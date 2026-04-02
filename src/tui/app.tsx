@@ -52,6 +52,11 @@ export function App({ store, projectPath }: AppProps) {
     }
   })
 
+  // Clear terminal on mount to prevent stacked frames
+  useEffect(() => {
+    process.stdout.write('\x1B[2J\x1B[H')
+  }, [])
+
   useEffect(() => {
     const refresh = () => {
       const allSessions = projectPath
