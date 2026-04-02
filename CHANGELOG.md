@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.5.0...v1.6.0) (2026-04-02)
+
+
+### Features
+
+* session rotation — the core value of clauditor ([62737e5](https://github.com/IyadhKhalfallah/clauditor/commit/62737e54d832b2e21048e3e4af1f5f46785466fb))
+
 ## [1.5.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.4.1...v1.5.0) (2026-04-02)
 
 
