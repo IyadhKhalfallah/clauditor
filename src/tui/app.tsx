@@ -76,12 +76,11 @@ export function App({ store, projectPath }: AppProps) {
   const mainSessions = sessions.filter((s) => !s.sessionId.startsWith('agent-'))
   const activeSession = mainSessions[0] || sessions[0]
 
-  // Today's sessions summary
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const todaySessions = sessions.filter((s) => s.lastUpdated >= todayStart)
-  const todayMainCount = todaySessions.filter((s) => !s.sessionId.startsWith('agent-')).length
-  const todaySubCount = todaySessions.filter((s) => s.sessionId.startsWith('agent-')).length
+  // Recent sessions summary (last 12h to avoid timezone issues)
+  const recentCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000)
+  const recentSessions = sessions.filter((s) => s.lastUpdated >= recentCutoff)
+  const recentMainCount = recentSessions.filter((s) => !s.sessionId.startsWith('agent-')).length
+  const recentSubCount = recentSessions.filter((s) => s.sessionId.startsWith('agent-')).length
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -89,7 +88,7 @@ export function App({ store, projectPath }: AppProps) {
         <Text bold color="cyan">
           ── clauditor ──
         </Text>
-        <Text dimColor>  {todayMainCount} sessions + {todaySubCount} subagents today</Text>
+        <Text dimColor>  {recentMainCount} sessions + {recentSubCount} subagents (last 12h)</Text>
       </Box>
 
       {sessions.length === 0 ? (
