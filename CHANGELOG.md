@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.0...v1.1.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* count degraded cache sessions in impact tracker, not just broken ([5001c18](https://github.com/IyadhKhalfallah/clauditor/commit/5001c180a5953649c5f12047535818fe00178e69))
+
 ## [1.1.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.3...v1.1.0) (2026-04-02)
 
 
