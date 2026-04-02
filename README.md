@@ -11,7 +11,7 @@ It reads Claude Code's local JSONL session files and integrates with the officia
 ## Install
 
 ```bash
-npm install -g clauditor
+npm install -g @iyadhk/clauditor
 ```
 
 Requires Node.js 20+.

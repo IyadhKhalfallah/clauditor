@@ -1,5 +1,5 @@
 {
-  "name": "clauditor",
+  "name": "@iyadhk/clauditor",
   "version": "0.1.0",
   "description": "Real-time token optimization and cache health daemon for Claude Code",
   "type": "module",
