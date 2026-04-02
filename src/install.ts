@@ -21,6 +21,14 @@ interface HookCommand {
 }
 
 const CLAUDITOR_HOOKS: Record<string, HookEventConfig> = {
+  UserPromptSubmit: {
+    matcher: '',
+    hooks: [{ type: 'command', command: 'clauditor hook user-prompt-submit' }],
+  },
+  PreCompact: {
+    matcher: '',
+    hooks: [{ type: 'command', command: 'clauditor hook pre-compact' }],
+  },
   SessionStart: {
     matcher: '',
     hooks: [{ type: 'command', command: 'clauditor hook session-start' }],

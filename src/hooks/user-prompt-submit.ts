@@ -1,0 +1,273 @@
+import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
+import { logActivity } from '../features/activity-log.js'
+
+/**
+ * UserPromptSubmit hook — fires BEFORE Claude processes the user's prompt.
+ *
+ * This is the breakthrough: we can BLOCK before any tokens are wasted.
+ * If the session's waste factor is too high, we block the prompt and
+ * show the user exactly why and what to do.
+ *
+ * The user sees this BEFORE burning another 300k tokens on a turn.
+ */
+
+interface UserPromptSubmitInput {
+  session_id: string
+  transcript_path?: string
+  cwd?: string
+  hook_event_name: 'UserPromptSubmit'
+  prompt?: string
+}
+
+const WASTE_THRESHOLD = 10  // 10x waste factor triggers block
+const MIN_TURNS = 30        // don't block early sessions
+const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.json')
+const ROTATION_CONFIG_FILE = resolve(homedir(), '.clauditor', 'rotation-config.json')
+
+export async function handleUserPromptSubmitHook(): Promise<void> {
+  const input = await readStdin()
+  let hookInput: UserPromptSubmitInput
+
+  try {
+    hookInput = JSON.parse(input)
+  } catch {
+    process.stdout.write('{}')
+    return
+  }
+
+  // Check config
+  const config = getRotationConfig()
+  if (!config.enabled) {
+    process.stdout.write('{}')
+    return
+  }
+
+  // Check if already blocked this session (only block once)
+  let blocked: Record<string, boolean> = {}
+  try {
+    blocked = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
+  } catch {}
+
+  if (blocked[hookInput.session_id]) {
+    process.stdout.write('{}')
+    return
+  }
+
+  try {
+    const sessionId = hookInput.session_id
+    const transcriptPath = hookInput.transcript_path || findTranscriptPathSync(sessionId)
+    if (!transcriptPath) {
+      process.stdout.write('{}')
+      return
+    }
+
+    const analysis = analyzeSession(transcriptPath)
+    if (!analysis || analysis.turns < MIN_TURNS) {
+      process.stdout.write('{}')
+      return
+    }
+
+    const wasteFactor = analysis.baseline > 0
+      ? Math.round(analysis.current / analysis.baseline)
+      : 0
+
+    if (wasteFactor < WASTE_THRESHOLD) {
+      process.stdout.write('{}')
+      return
+    }
+
+    // BLOCK — save context and tell the user
+    blocked[sessionId] = true
+    try {
+      mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+      writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blocked))
+    } catch {}
+
+    // Write session state to CLAUDE.md
+    if (config.writeToClaudeMd && analysis.cwd) {
+      writeSessionState(analysis)
+    }
+
+    logActivity({
+      type: 'context_warning',
+      session: sessionId.slice(0, 8),
+      message: `BLOCKED prompt — ${wasteFactor}x waste factor (${Math.round(analysis.current / 1000)}k/turn vs ${Math.round(analysis.baseline / 1000)}k baseline)`,
+    }).catch(() => {})
+
+    // Output block decision
+    const filesList = analysis.filesModified.length > 0
+      ? analysis.filesModified.slice(0, 10).join(', ')
+      : 'none tracked'
+
+    process.stdout.write(JSON.stringify({
+      decision: 'block',
+      reason:
+        `\n╔══════════════════════════════════════════════════════════════╗\n` +
+        `║  clauditor: Session using ${wasteFactor}x more quota than necessary  ║\n` +
+        `╚══════════════════════════════════════════════════════════════╝\n\n` +
+        `Your turns started at ${Math.round(analysis.baseline / 1000)}k tokens.\n` +
+        `They're now at ${Math.round(analysis.current / 1000)}k tokens.\n` +
+        `Each turn uses ${wasteFactor}x more quota than when this session started.\n\n` +
+        `Progress saved to CLAUDE.md:\n` +
+        `  Branch: ${analysis.branch || 'unknown'}\n` +
+        `  Files: ${filesList}\n` +
+        `  Turns: ${analysis.turns}\n\n` +
+        `Start fresh: run \`claude\` — your context loads from CLAUDE.md automatically.\n` +
+        `Or press Enter to continue in this session (not recommended).`,
+    }))
+  } catch {
+    process.stdout.write('{}')
+  }
+}
+
+interface SessionAnalysis {
+  turns: number
+  baseline: number      // avg tokens/turn for first 5 turns
+  current: number       // avg tokens/turn for last 5 turns
+  cwd: string | null
+  branch: string | null
+  filesModified: string[]
+}
+
+function analyzeSession(transcriptPath: string): SessionAnalysis | null {
+  try {
+    const content = readFileSync(transcriptPath, 'utf-8')
+    const lines = content.split('\n')
+
+    const turnTokens: number[] = []
+    const filesModified = new Set<string>()
+    let cwd: string | null = null
+    let branch: string | null = null
+
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const r = JSON.parse(lines[i])
+        if (r.type === 'user' && r.cwd && !cwd) {
+          cwd = r.cwd
+          branch = r.gitBranch || null
+        }
+      } catch {}
+    }
+
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line)
+        if (r.type === 'assistant' && r.message?.usage) {
+          const u = r.message.usage
+          const total = (u.input_tokens || 0) + (u.output_tokens || 0) +
+            (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
+          turnTokens.push(total)
+        }
+        if (r.type === 'assistant' && r.message?.content) {
+          for (const block of r.message.content) {
+            if (block.type === 'tool_use' && (block.name === 'Edit' || block.name === 'Write')) {
+              const fp = block.input?.file_path
+              if (fp) filesModified.add(fp.split('/').pop() || fp)
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (turnTokens.length < MIN_TURNS) return null
+
+    const baseline = turnTokens.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
+    const current = turnTokens.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
+
+    return {
+      turns: turnTokens.length,
+      baseline,
+      current,
+      cwd,
+      branch,
+      filesModified: Array.from(filesModified),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeSessionState(analysis: SessionAnalysis): void {
+  if (!analysis.cwd) return
+
+  try {
+    const claudeMdPath = resolve(analysis.cwd, 'CLAUDE.md')
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const filesList = analysis.filesModified.length > 0
+      ? analysis.filesModified.slice(0, 15).join(', ')
+      : 'none tracked'
+    const wasteFactor = analysis.baseline > 0
+      ? Math.round(analysis.current / analysis.baseline)
+      : 0
+
+    const stateBlock = [
+      '',
+      '## Session State (auto-saved by clauditor)',
+      `- **Saved at:** ${now}`,
+      `- **Branch:** ${analysis.branch || 'unknown'}`,
+      `- **Session size:** ${analysis.turns} turns, ${Math.round(analysis.current / 1000)}k tokens/turn`,
+      `- **Waste factor:** ${wasteFactor}x (started at ${Math.round(analysis.baseline / 1000)}k/turn)`,
+      `- **Files modified:** ${filesList}`,
+      `- **Action:** Start a fresh session with \`claude\` — this context will load automatically`,
+      '',
+    ].join('\n')
+
+    let existing = ''
+    try {
+      existing = readFileSync(claudeMdPath, 'utf-8')
+    } catch {}
+
+    if (existing.includes('Session State (auto-saved by clauditor')) {
+      existing = existing.replace(
+        /\n## Session State \(auto-saved by clauditor[^)]*\)[\s\S]*?(?=\n## |\n$|$)/,
+        stateBlock
+      )
+      writeFileSync(claudeMdPath, existing)
+    } else {
+      appendFileSync(claudeMdPath, stateBlock)
+    }
+  } catch {}
+}
+
+function getRotationConfig(): { enabled: boolean; writeToClaudeMd: boolean } {
+  try {
+    const raw = JSON.parse(readFileSync(ROTATION_CONFIG_FILE, 'utf-8'))
+    return { enabled: raw.enabled ?? true, writeToClaudeMd: raw.writeToClaudeMd ?? true }
+  } catch {
+    return { enabled: true, writeToClaudeMd: true }
+  }
+}
+
+function findTranscriptPathSync(sessionId: string): string | null {
+  const projectsDir = resolve(homedir(), '.claude/projects')
+  try {
+    const dirs = readdirSync(projectsDir, { withFileTypes: true })
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue
+      const candidate = resolve(projectsDir, dir.name, `${sessionId}.jsonl`)
+      try {
+        readFileSync(candidate, { flag: 'r' })
+        return candidate
+      } catch {}
+    }
+  } catch {}
+  return null
+}
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    process.stdin.setEncoding('utf-8')
+    process.stdin.on('data', (chunk) => (data += chunk))
+    process.stdin.on('end', () => resolve(data))
+    process.stdin.on('error', reject)
+  })
+}
+
+handleUserPromptSubmitHook().catch((err) => {
+  process.stderr.write(`clauditor user-prompt-submit hook error: ${err}\n`)
+  process.stdout.write('{}')
+  process.exit(0)
+})

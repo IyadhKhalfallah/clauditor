@@ -1,109 +1,93 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { SessionState } from '../types.js'
-import { CachePanel } from './cache-panel.js'
 import { estimateCost, getPricingForModel } from '../features/cost-tracker.js'
-import { readActivity, type ActivityEvent } from '../features/activity-log.js'
 
 interface DashboardProps {
   session: SessionState
 }
 
-function decodeProjectPath(encoded: string): string {
-  if (encoded.startsWith('-')) {
-    return '/' + encoded.slice(1).replace(/-/g, '/')
-  }
-  return encoded.replace(/-/g, '/')
-}
-
 export function Dashboard({ session }: DashboardProps) {
   const pricing = session.model ? getPricingForModel(session.model) : undefined
   const cost = estimateCost(session.totalUsage, pricing)
-  const displayPath = session.cwd || decodeProjectPath(session.projectPath)
   const modelShort = session.model?.replace('claude-', '').split('-2')[0] || 'unknown'
 
-  const lastTurn = session.turns[session.turns.length - 1]
-  const contextSize = lastTurn
-    ? lastTurn.usage.input_tokens +
-      lastTurn.usage.cache_creation_input_tokens +
-      lastTurn.usage.cache_read_input_tokens
-    : 0
-  const isOpus = session.model?.includes('opus') ?? false
-  const contextLimit = isOpus ? 1_000_000 : 200_000
-  const contextLimitLabel = isOpus ? '1M' : '200k'
-  const contextPct = Math.round((contextSize / contextLimit) * 100)
+  // Calculate waste factor: current tokens/turn vs baseline (first 5 turns)
+  const turnTokens = session.turns.map((t) =>
+    t.usage.input_tokens + t.usage.output_tokens +
+    t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+  )
 
-  // Avg tokens per turn (last 10)
-  const recentTurns = session.turns.slice(-10)
-  const avgTokensPerTurn = recentTurns.length > 0
-    ? recentTurns.reduce((sum, t) =>
-        sum + t.usage.input_tokens + t.usage.output_tokens +
-        t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
-      ) / recentTurns.length
-    : 0
-  const rotationThreshold = 100_000
-  const rotationPct = Math.min(100, Math.round((avgTokensPerTurn / rotationThreshold) * 100))
-  const willRotate = avgTokensPerTurn >= rotationThreshold && session.turns.length >= 30
+  const baseline = turnTokens.length >= 5
+    ? turnTokens.slice(0, 5).reduce((a, b) => a + b, 0) / 5
+    : turnTokens.length > 0
+      ? turnTokens.slice(0, turnTokens.length).reduce((a, b) => a + b, 0) / turnTokens.length
+      : 0
 
-  // Rotation progress bar
+  const current = turnTokens.length >= 5
+    ? turnTokens.slice(-5).reduce((a, b) => a + b, 0) / 5
+    : baseline
+
+  const wasteFactor = baseline > 0 ? Math.round(current / baseline) : 1
+  const willBlock = wasteFactor >= 10 && session.turns.length >= 30
+
+  // Waste bar: 1x = empty, 10x = full (block threshold)
   const barWidth = 30
-  const filled = Math.round((rotationPct / 100) * barWidth)
+  const barPct = Math.min(1, (wasteFactor - 1) / 9) // 1x=0%, 10x=100%
+  const filled = Math.round(barPct * barWidth)
   const empty = barWidth - filled
-  const rotationBar = '█'.repeat(filled) + '░'.repeat(empty)
-  const rotationColor = willRotate ? 'red' : rotationPct >= 70 ? 'yellow' : 'green'
+  const wasteBar = '█'.repeat(filled) + '░'.repeat(empty)
+  const barColor = willBlock ? 'red' : wasteFactor >= 7 ? 'yellow' : 'green'
+
+  // Cache status
+  const cacheRatio = session.cacheHealth.lastCacheRatio
+  const cacheOk = cacheRatio >= 0.7
 
   return (
     <Box flexDirection="column">
       {/* Header */}
-      <Box flexDirection="column" marginBottom={1}>
+      <Box marginBottom={1}>
         <Text>
           <Text bold>{session.label}</Text>
           {'  '}
           <Text dimColor>{modelShort} · {session.turns.length} turns</Text>
         </Text>
-        <Text dimColor>{displayPath}</Text>
       </Box>
 
-      {/* The one number that matters: tokens per turn → rotation threshold */}
+      {/* Waste factor — the one number that matters */}
       <Box flexDirection="column" marginBottom={1}>
         <Text>
-          <Text bold>{(avgTokensPerTurn / 1000).toFixed(0)}k</Text> tokens/turn
+          <Text bold>Waste factor: {wasteFactor}x</Text>
           {'  '}
-          {willRotate ? (
-            <Text color="red" bold>ROTATION TRIGGERED — context saved to CLAUDE.md</Text>
+          {willBlock ? (
+            <Text color="red" bold>BLOCKED — start a fresh session</Text>
+          ) : wasteFactor >= 7 ? (
+            <Text color="yellow">approaching rotation</Text>
           ) : (
-            <Text dimColor>{rotationPct}% to rotation</Text>
+            <Text color="green">efficient</Text>
           )}
         </Text>
-        <Text color={rotationColor}>
-          {rotationBar}
-        </Text>
-        {willRotate && (
-          <Text color="cyan">→ Start a fresh session with `claude` to use {Math.round(avgTokensPerTurn / 10000)}x less quota per turn</Text>
-        )}
-      </Box>
-
-      {/* Key metrics — one line each */}
-      <Box flexDirection="column">
-        <Text>
-          Cache: <Text color={session.cacheHealth.lastCacheRatio >= 0.7 ? 'green' : 'red'}>
-            {(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}%
-          </Text>
-          {'  '}
-          Context: <Text color={contextPct >= 90 ? 'red' : contextPct >= 70 ? 'yellow' : 'green'}>
-            {contextPct}%
-          </Text>
-          <Text dimColor> ({(contextSize / 1000).toFixed(0)}k / {contextLimitLabel})</Text>
-          {'  '}
-          <Text dimColor>~${cost.totalCost.toFixed(0)} API est.</Text>
+        <Text color={barColor}>{wasteBar}</Text>
+        <Text dimColor>
+          Started at {(baseline / 1000).toFixed(0)}k/turn → now {(current / 1000).toFixed(0)}k/turn
+          {wasteFactor > 1 ? ` (${wasteFactor}x more quota per turn)` : ''}
         </Text>
       </Box>
 
-      {/* Alerts — only show if something is actually wrong */}
-      {session.cacheHealth.status !== 'healthy' && session.cacheHealth.status !== 'unknown' && (
+      {/* Secondary metrics — one line */}
+      <Text>
+        Cache: <Text color={cacheOk ? 'green' : 'red'}>{(cacheRatio * 100).toFixed(0)}%</Text>
+        {'  '}
+        Turns: {session.turns.length}
+        {'  '}
+        <Text dimColor>~${cost.totalCost.toFixed(0)} API est.</Text>
+      </Text>
+
+      {/* Alerts — only real problems */}
+      {!cacheOk && session.turns.length >= 3 && (
         <Box marginTop={1}>
           <Text color="red" bold>
-            ● Cache {session.cacheHealth.status} — {(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}% hit rate
+            ● Cache broken — {(cacheRatio * 100).toFixed(0)}% hit rate (should be &gt;70%)
           </Text>
         </Box>
       )}
@@ -114,10 +98,13 @@ export function Dashboard({ session }: DashboardProps) {
           </Text>
         </Box>
       )}
-      {session.resumeAnomaly.detected && (
-        <Box>
-          <Text color="red" bold>
-            ● Resume anomaly — {session.resumeAnomaly.outputTokenSpike ? 'token explosion' : 'cache invalidated'}
+
+      {/* How it works — transparency */}
+      {session.turns.length < 10 && (
+        <Box marginTop={1}>
+          <Text dimColor>
+            clauditor tracks tokens/turn as your session grows.{'\n'}
+            At 10x waste (30+ turns), it saves context to CLAUDE.md and blocks.
           </Text>
         </Box>
       )}

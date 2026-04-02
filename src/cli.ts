@@ -709,6 +709,20 @@ hookCmd
   })
 
 hookCmd
+  .command('user-prompt-submit')
+  .description('UserPromptSubmit hook handler — blocks oversized sessions')
+  .action(async () => {
+    await import('./hooks/user-prompt-submit.js')
+  })
+
+hookCmd
+  .command('pre-compact')
+  .description('PreCompact hook handler — saves context before compaction')
+  .action(async () => {
+    await import('./hooks/pre-compact.js')
+  })
+
+hookCmd
   .command('session-start')
   .description('SessionStart hook handler')
   .action(async () => {
