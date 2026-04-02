@@ -98,24 +98,18 @@ export function updateImpactFromSessions(
       }
     }
 
-    // Aggregate measurable data
-    updated.totalTurnsMonitored += session.turns.length
-
-    if (session.turns.length >= 3) {
-      // Only count sessions with enough data for cache ratio
-      const ratio = session.cacheHealth.lastCacheRatio
-      if (ratio >= 0.7) {
-        // Count toward healthy sessions
-      }
-    }
   }
 
-  // Recompute aggregate KPIs from all sessions (not just new ones)
+  // Recompute aggregate KPIs from ALL sessions (not just new ones)
+  // These are recalculated fresh every time to stay accurate
   let healthyCount = 0
   let totalRatio = 0
   let sessionsWithRatio = 0
+  let totalTurns = 0
 
   for (const session of sessions) {
+    totalTurns += session.turns.length
+
     if (session.turns.length >= 3) {
       sessionsWithRatio++
       totalRatio += session.cacheHealth.lastCacheRatio
@@ -125,6 +119,7 @@ export function updateImpactFromSessions(
     }
   }
 
+  updated.totalTurnsMonitored = totalTurns
   updated.healthySessionPct = sessionsWithRatio > 0
     ? Math.round((healthyCount / sessionsWithRatio) * 100)
     : 0
