@@ -61,7 +61,7 @@ export function updateImpactFromSessions(
 
     updated.sessionsMonitored++
 
-    if (session.cacheHealth.degradationDetected) {
+    if (session.cacheHealth.degradationDetected || session.cacheHealth.status === 'degraded') {
       updated.cacheIssuesCaught++
     }
 
