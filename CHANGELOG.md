@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.1...v1.1.2) (2026-04-02)
+
+
+### Bug Fixes
+
+* clear terminal before Ink renders to prevent duplicate frames ([e6933b8](https://github.com/IyadhKhalfallah/clauditor/commit/e6933b8bfd68555acbf66fee7f4c4f745b87f3f3))
+* clear terminal on TUI mount to prevent duplicate rendering ([0678a9e](https://github.com/IyadhKhalfallah/clauditor/commit/0678a9e25b658abfdae7fc7f8a3bc36336a42076))
+* use platform-aware path handling for Windows compatibility ([ac778d2](https://github.com/IyadhKhalfallah/clauditor/commit/ac778d2422f3ec25282cdd44209a5ff788546b6c))
+
+
+### Performance Improvements
+
+* incremental JSONL parsing — only read new lines on file change ([a941dbe](https://github.com/IyadhKhalfallah/clauditor/commit/a941dbe9cc7995b425ce696ccdbf8bd78547e052))
+
 ## [1.1.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.0...v1.1.1) (2026-04-02)
 
 
