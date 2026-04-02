@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.12.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.11.1...v1.12.0) (2026-04-02)
+
+
+### Features
+
+* save session state to ~/.clauditor/ instead of CLAUDE.md ([cb9abd5](https://github.com/IyadhKhalfallah/clauditor/commit/cb9abd5294f1be3a33fd3df36c1f360f4e782720))
+
+
+### Bug Fixes
+
+* suppress cache warmup false alarm, fix session status icons ([fb0f3e3](https://github.com/IyadhKhalfallah/clauditor/commit/fb0f3e3b92d40598f411b96c1b47117407ef3037))
+
 ## [1.11.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.11.0...v1.11.1) (2026-04-02)
 
 
