@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.10.0...v1.11.0) (2026-04-02)
+
+
+### Features
+
+* PostToolUse block for autonomous sessions ([d154a68](https://github.com/IyadhKhalfallah/clauditor/commit/d154a6822d824e7eb72efa25539dabe91b809576))
+
 ## [1.10.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.9.1...v1.10.0) (2026-04-02)
 
 
