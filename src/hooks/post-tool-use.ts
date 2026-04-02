@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
@@ -415,28 +415,130 @@ function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string |
 
   const freshEstimate = Math.round(avgTokens / 10 / 1000)
   const currentK = Math.round(avgTokens / 1000)
+  const ratio = Math.round(avgTokens / (freshEstimate * 1000))
+
+  // Write session state to CLAUDE.md DIRECTLY — don't rely on Claude to do it
+  writeSessionState(sessionId, turns, currentK, ratio)
 
   logActivity({
     type: 'context_warning',
     session: sessionId.slice(0, 8),
-    message: `Session rotation triggered — ${currentK}k tokens/turn avg, recommended fresh start`,
+    message: `Session rotation triggered — ${currentK}k tokens/turn avg, saved state to CLAUDE.md`,
   }).catch(() => {})
 
   return (
     `[clauditor — SESSION ROTATION]: This session is using ${currentK}k tokens per turn. ` +
-    `A fresh session would use ~${freshEstimate}k per turn — ${Math.round(avgTokens / (freshEstimate * 1000))}x less quota for the same work.\n\n` +
-    `DO THIS NOW:\n` +
-    `1. Save the current session state to CLAUDE.md. Include:\n` +
-    `   - What task you're working on and current status\n` +
-    `   - Key decisions made in this session\n` +
-    `   - Files modified and why\n` +
-    `   - What remains to be done\n` +
-    `2. Tell the user: "This session has grown large (${turns.length} turns, ${currentK}k tokens/turn). ` +
-    `I've saved our progress to CLAUDE.md. Starting a fresh session will use ${Math.round(avgTokens / (freshEstimate * 1000))}x less of your quota ` +
-    `for the same work. Run \`claude\` to start fresh — I'll pick up exactly where we left off from CLAUDE.md."\n\n` +
-    `This is not optional — large sessions directly cause the "limit hit in 20 minutes" problem ` +
-    `that Claude Code users report. Rotating sessions is the single most effective way to preserve quota.`
+    `A fresh session would use ~${freshEstimate}k per turn — ${ratio}x less quota.\n\n` +
+    `clauditor has already saved session state to CLAUDE.md.\n\n` +
+    `Tell the user: "This session has grown large (${turns.length} turns, ${currentK}k tokens/turn). ` +
+    `I've saved our progress to CLAUDE.md. Starting a fresh session will use ${ratio}x less of your quota ` +
+    `for the same work. Run \`claude\` to start fresh — I'll pick up exactly where we left off."`
   )
+}
+
+/**
+ * Write session state to CLAUDE.md directly from the hook.
+ * This actually executes instead of relying on Claude to follow instructions.
+ */
+function writeSessionState(sessionId: string, turns: TurnMetrics[], tokensPerTurnK: number, ratio: number): void {
+  try {
+    // Find the cwd from the transcript
+    const transcriptPath = findTranscriptPathSync(sessionId)
+    if (!transcriptPath) return
+
+    const content = readFileSync(transcriptPath, 'utf-8')
+    const lines = content.split('\n')
+
+    // Extract cwd from first user record
+    let cwd: string | null = null
+    let gitBranch: string | null = null
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line)
+        if (r.type === 'user' && r.cwd) {
+          cwd = r.cwd
+          gitBranch = r.gitBranch || null
+          break
+        }
+      } catch {}
+    }
+    if (!cwd) return
+
+    const claudeMdPath = resolve(cwd, 'CLAUDE.md')
+
+    // Extract files modified (from Edit/Write tool calls in the transcript)
+    const filesModified = new Set<string>()
+    for (const line of lines) {
+      try {
+        const r = JSON.parse(line)
+        if (r.type === 'assistant' && r.message?.content) {
+          for (const block of r.message.content) {
+            if (block.type === 'tool_use' && (block.name === 'Edit' || block.name === 'Write')) {
+              const fp = block.input?.file_path
+              if (fp) filesModified.add(fp.split('/').pop() || fp)
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const filesList = filesModified.size > 0
+      ? Array.from(filesModified).slice(0, 15).join(', ')
+      : 'none tracked'
+
+    const stateBlock = [
+      '',
+      '## Session State (auto-saved by clauditor)',
+      `- **Saved at:** ${now}`,
+      `- **Branch:** ${gitBranch || 'unknown'}`,
+      `- **Session size:** ${turns.length} turns, ${tokensPerTurnK}k tokens/turn`,
+      `- **Reason:** Session rotation — a fresh session uses ${ratio}x less quota`,
+      `- **Files modified:** ${filesList}`,
+      `- **Action:** Start a fresh session with \`claude\` — this context will load automatically`,
+      '',
+    ].join('\n')
+
+    // Read existing CLAUDE.md and check if we already appended
+    let existing = ''
+    try {
+      existing = readFileSync(claudeMdPath, 'utf-8')
+    } catch {}
+
+    if (existing.includes('Session State (auto-saved by clauditor)')) {
+      // Replace existing session state block
+      existing = existing.replace(
+        /\n## Session State \(auto-saved by clauditor\)[\s\S]*?(?=\n## |\n$|$)/,
+        stateBlock
+      )
+      writeFileSync(claudeMdPath, existing)
+    } else {
+      // Append
+      appendFileSync(claudeMdPath, stateBlock)
+    }
+  } catch {
+    // Non-critical — if we can't write, the additionalContext message is still sent
+  }
+}
+
+/**
+ * Synchronous version of findTranscriptPath for use in the rotation check.
+ */
+function findTranscriptPathSync(sessionId: string): string | null {
+  const projectsDir = resolve(homedir(), '.claude/projects')
+  try {
+    const { readdirSync } = require('node:fs')
+    const dirs = readdirSync(projectsDir, { withFileTypes: true })
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue
+      const candidate = resolve(projectsDir, dir.name, `${sessionId}.jsonl`)
+      try {
+        readFileSync(candidate, { flag: 'r' })
+        return candidate
+      } catch {}
+    }
+  } catch {}
+  return null
 }
 
 const ERROR_PATTERNS = [
