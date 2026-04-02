@@ -137,8 +137,8 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
       if (dropped) {
         warnings.push(
           `[clauditor]: Cache efficiency dropped from ${(peak * 100).toFixed(0)}% to ${(current * 100).toFixed(0)}% ` +
-          `in the last few turns. This could be temporary (large tool output can cause a dip) or a sign ` +
-          `of cache invalidation. If it doesn't recover in the next 2-3 turns, suggest running /clear to the user.`
+          `in the last few turns. This is likely temporary — large tool outputs (file reads, verbose bash) ` +
+          `can cause a dip that recovers on the next turn. No action needed unless it stays below 70% for 5+ turns.`
         )
         logActivity({
           type: 'cache_warning',

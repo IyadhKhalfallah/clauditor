@@ -112,9 +112,9 @@ function getAlerts(session: SessionState): Alert[] {
   } else if (session.cacheHealth.status === 'degraded') {
     alerts.push({
       level: 'yellow',
-      title: 'Cache efficiency is low — responses may be slower',
-      detail: `Cache hit ratio is ${(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}% (should be >70%). Claude is doing extra work each turn.`,
-      action: 'Monitor the next few turns. If it doesn\'t improve, run /clear to reset.',
+      title: 'Cache efficiency dipped — likely temporary',
+      detail: `Cache hit ratio is ${(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}% (should be >70%). This often recovers on its own after a large file read or verbose output.`,
+      action: 'No action needed yet. If it stays below 70% for 5+ turns, then consider running /clear.',
     })
   }
 
