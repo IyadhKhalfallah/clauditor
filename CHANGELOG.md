@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.4.0...v1.4.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* skill suggestions show real commands, not generic patterns ([a324c93](https://github.com/IyadhKhalfallah/clauditor/commit/a324c938709eb591e421d61a5d0672422171638d))
+
 ## [1.4.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.3.0...v1.4.0) (2026-04-02)
 
 
