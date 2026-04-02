@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.9.1...v1.10.0) (2026-04-02)
+
+
+### Features
+
+* UserPromptSubmit block + PreCompact + waste factor dashboard ([e2361a7](https://github.com/IyadhKhalfallah/clauditor/commit/e2361a70a04f2485d962ba910d15b4ad86fa8b72))
+
+
+### Bug Fixes
+
+* extract branch from most recent user record, not first ([dab6861](https://github.com/IyadhKhalfallah/clauditor/commit/dab6861394a56a41dafd59891bf684ca6e4f7f84))
+
 ## [1.9.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.9.0...v1.9.1) (2026-04-02)
 
 
