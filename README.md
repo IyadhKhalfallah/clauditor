@@ -8,6 +8,8 @@ It reads Claude Code's local JSONL session files and integrates with the officia
 
 **It does not intercept network traffic, spoof the Claude Code harness, or violate Anthropic's ToS.**
 
+**Supported platforms:** Claude Code CLI (`claude`), VS Code extension, JetBrains extension. Does **not** work with Claude Code on the web (claude.ai/code) — the web version doesn't write local session files or support hooks.
+
 ## Install
 
 ```bash
