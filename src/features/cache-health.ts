@@ -47,11 +47,11 @@ export function detectCacheDegradation(turns: TurnMetrics[]): CacheHealth {
 
   const status: CacheHealth['status'] = degraded
     ? 'broken'
-    : lastRatio < 0.4 && turns.length >= 3
-      ? 'degraded'
-      : lastRatio >= 0.7
-        ? 'healthy'
-        : 'unknown'
+    : lastRatio >= 0.7
+      ? 'healthy'
+      : turns.length < 3
+        ? 'unknown'
+        : 'degraded'
 
   return {
     status,
