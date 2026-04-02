@@ -1,152 +1,166 @@
-# clauditor
+<p align="center">
+  <h1 align="center">clauditor</h1>
+  <p align="center">
+    <strong>Stop Claude Code from burning through your quota in 20 minutes.</strong>
+  </p>
+  <p align="center">
+    <a href="https://www.npmjs.com/package/@iyadhk/clauditor"><img src="https://img.shields.io/npm/v/@iyadhk/clauditor" alt="npm version"></a>
+    <a href="https://github.com/IyadhKhalfallah/clauditor/actions"><img src="https://img.shields.io/github/actions/workflow/status/IyadhKhalfallah/clauditor/ci.yml?branch=main" alt="CI"></a>
+    <a href="https://github.com/IyadhKhalfallah/clauditor/blob/main/LICENSE"><img src="https://img.shields.io/github/license/IyadhKhalfallah/clauditor" alt="MIT License"></a>
+  </p>
+</p>
 
-> Session health monitoring for Claude Code — keep your sessions fast and your context intact.
+---
 
-clauditor is an open-source background daemon that monitors your Claude Code sessions. It **automatically** prevents the most common problems: broken cache draining your quota, loops wasting your time, and compaction erasing your context.
+## The problem
 
-**Install it, forget it exists. It prevents problems.**
+Every turn in a Claude Code session re-sends your entire conversation history to the API. A fresh session sends ~20k tokens per turn. A 200-turn session sends ~200k per turn. **Same work, 10x more quota.**
 
-It reads Claude Code's local JSONL session files and integrates with the official [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks).
+```
+Turn    1: ██ 20k tokens
+Turn   50: ██████████ 100k tokens
+Turn  200: ████████████████████ 200k tokens
+Turn  500: ██████████████████████████████████████████ 400k tokens
+```
 
-**It does not intercept network traffic, spoof the Claude Code harness, or violate Anthropic's ToS.**
+This is why your session limit gets hit in 20 minutes. Not because of a bug — because sessions grow linearly and nobody tells you to start fresh.
 
-**Supported platforms:** Claude Code CLI (`claude`), VS Code extension, JetBrains extension. Does **not** work with Claude Code on the web (claude.ai/code) — the web version doesn't write local session files or support hooks.
+## The solution
 
-**Multi-device:** clauditor monitors sessions per-device. If you work across multiple laptops, install clauditor on each one — hooks and impact stats are local to each machine.
+clauditor monitors your session size and **blocks Claude when you're wasting quota**, saving your progress so you can start fresh without losing context.
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  clauditor: Session using 16x more quota than necessary     ║
+╚══════════════════════════════════════════════════════════════╝
+
+Your turns started at 25k tokens.
+They're now at 398k tokens.
+Each turn uses 16x more quota than when this session started.
+
+Session state saved.
+  Branch: feat/variable-agent
+  Files: FileAgent.cs, ServiceCollectionExtensions.cs, +13 more
+  Turns: 889
+
+Start fresh: run `claude` — clauditor will inject your previous session context.
+```
+
+Claude sees this, stops, and tells you to start a fresh session. Your context is preserved. Zero tokens wasted.
 
 ## Install
 
 ```bash
 npm install -g @iyadhk/clauditor
+clauditor install
 ```
+
+That's it. Two commands. clauditor registers hooks into Claude Code and runs in the background. No dashboard needed. No config needed.
 
 Requires Node.js 20+.
 
-## Quick start
+**Supported platforms:** Claude Code CLI, VS Code extension, JetBrains extension. Does **not** work with Claude Code on the web (claude.ai/code).
+
+## How it works
+
+clauditor registers 5 hooks into Claude Code:
+
+### `UserPromptSubmit` — blocks before tokens are wasted
+
+Before Claude processes your prompt, clauditor checks the **waste factor**: how many more tokens per turn you're using compared to the start of your session.
+
+```
+Waste factor = current tokens/turn ÷ baseline tokens/turn
+
+  1x = efficient (fresh session)
+  5x = growing
+ 10x = blocked — start fresh
+```
+
+At 10x waste (configurable), clauditor blocks the prompt. You see the message. Claude sees it. No tokens are burned on the blocked turn.
+
+### `PostToolUse` — blocks during autonomous work
+
+When Claude is working autonomously (editing files, running commands), there's no user prompt to intercept. The PostToolUse hook catches this — after each tool call, it checks the waste factor and blocks if too high.
+
+Uses exit code 2, which Claude Code treats as a blocking error. Claude acknowledges it and stops.
+
+### `PreCompact` — saves context before compaction
+
+Fires at the exact moment before Claude Code compacts your context. Saves session state (branch, files modified, turn count) to `~/.clauditor/last-session.md`. No guessing about context thresholds.
+
+### `SessionStart` — injects previous session context
+
+When you start a new session, clauditor reads the saved state from `~/.clauditor/last-session.md` and injects it into Claude's context. Claude picks up where you left off.
+
+### `Stop` — blocks infinite loops
+
+When Claude repeats the same tool call 3+ times with identical input and output, the Stop hook blocks it.
+
+## Real data
+
+From a real user's Claude Code usage over 7 days:
+
+```
+Session                                  Turns  Tokens/turn   Waste
+─────────────────────────────────────────────────────────────────────
+api-service (feat/variable-agent)          889     395k/turn    16x   ← clauditor blocked this
+api-service (feat/variable-agent)            5      20k/turn     1x   ← fresh session after block
+api-service (feat/agentic-file)            779     168k/turn    13x
+api-service (fix/delete-test-cases)        321     116k/turn     9x
+api-service (dev)                          300     137k/turn    10x
+api-service (fix/file-assertion)           216      99k/turn     8x
+```
+
+Every session over 100 turns was burning 8-16x more quota than necessary. clauditor would have rotated each one, reducing total quota usage by an estimated 5-10x.
+
+## Dashboard (optional)
 
 ```bash
-# Register hooks into Claude Code (one-time setup)
-clauditor install
-
-# That's it. Hooks run automatically in the background.
-# To verify it's working, run the dashboard:
 clauditor watch
 ```
 
-## What it does (automatically, after install)
-
-clauditor registers three hooks into Claude Code that act **without any user intervention**:
-
-### 1. Pre-compaction context save
-
-The #1 complaint from Claude Code users: "Claude forgets everything after compaction." When your context window hits 95%, clauditor instructs Claude to save key decisions, file changes, and task status to CLAUDE.md **before** compaction erases them. Next session, Claude reads CLAUDE.md automatically — zero re-explaining.
-
-### 2. Loop blocker
-
-When Claude repeats the same tool call 3+ times with identical results, the Stop hook blocks it and tells Claude to try a different approach. Prevents burning tokens on repeated failures.
-
-### 3. Edit thrashing detector
-
-When Claude edits the same file 5+ times in one session, clauditor tells it to stop and explain its approach to the user before making more changes. Prevents "rushing through everything" — Claude steps back and thinks about the design instead of iterating blindly.
-
-### 4. Session start health briefing
-
-When you start Claude Code, clauditor checks your recent sessions for issues (broken cache, resume anomalies) and injects a health briefing into Claude's context. Claude starts each session aware of potential problems.
-
-### 5. Cache degradation warning
-
-Detects when `cache_read` stays flat while `cache_creation` grows — meaning your conversation is being reprocessed from scratch each turn (10-20x more expensive/slower). Injects a warning into Claude's context with the fix.
-
-### 6. Resume anomaly detection
-
-Detects two known bugs with `--resume` and `--continue`:
-
-- **Token explosion** ([#38029](https://github.com/anthropics/claude-code/issues/38029)): 652K+ output tokens generated silently on resume
-- **Cache invalidation** ([#40524](https://github.com/anthropics/claude-code/issues/40524)): resume breaks prompt cache entirely
-
-### 7. Bash output compression
-
-Compresses verbose bash output (npm install logs, build progress, progress bars) to reduce token waste. Strips noise, keeps errors.
-
-## Dashboard (`clauditor watch`)
-
-Run `clauditor watch` to see your sessions in real-time. Useful for verifying clauditor is working, or for monitoring a long session.
-
 ```
-── clauditor ──
+── clauditor ──  4 sessions + 24 subagents (last 12h)
 
- RECENT SESSIONS (16)
+ api-service (feat/variable-agent)  opus-4-6 · 33 turns
 
-    api-service (feat/agentic-file  healthy    679 turns  just now
-    ↳ (a8) Search the web for dev…  healthy     75 turns  1h ago
-    ↳ (ac) Compare implementation…  degraded   197 turns  5h ago
+ Waste factor: 2x  efficient
+ ███░░░░░░░░░░░░░░░░░░░░░░░░░░░
+ Started at 20k/turn → now 41k/turn (2x more quota per turn)
 
- api-service (feat/agentic-file-operations)  opus-4-6  679 turns
- /Users/alice/projects/api-service
+ Cache: 99%  Turns: 33  ~$4 API est.
 
- CACHE HEALTH
+ OTHER SESSIONS
+ ⟲ api-service (feat/variable-agent)    902 turns  400k/turn
+ · api-service (feat/agentic-file)        2 turns   20k/turn
+ ✓ api-service (feat/agentic-file)      209 turns  193k/turn
 
-  Turn 676: ████████████████████ 100% ✓
-  Turn 677: ████████████████████ 100% ✓
-  Turn 678: ████████████████████ 100% ✓
-  Turn 679: ████████████████████ 100% ✓
+ LAST ACTIONS
+ just now   📦 BLOCKED tool result — 16x waste
+ 8m ago     📦 BLOCKED prompt — 15x waste factor
 
-  Status: ✓ healthy
-
- SESSION HEALTH
-
-  Context window: 29% (289k / 1M tokens)
-  Cache efficiency: 100% (fast responses)
-  Burn rate: 14k tokens/min (normal)
-  Output: 140,803 tokens   679 turns this session
-
- API cost estimate: ~$514.25 · saved ~$992.53 by cache
-
- ALERTS
-
-  All clear — session is healthy.
-
- RECENT ACTIVITY
-
-  2m ago     ⚡ Injected cache warning — ratio at 12%
-  15m ago    🛑 Blocked loop — Bash call(s) repeated 4x
-  3h ago     📦 Compressed bash output: 12.4k → 1.8k chars
-
- Press q to quit
+ q to quit
 ```
 
-- Sessions labeled by **project name, git branch, and subagent task** — not cryptic IDs
-- Model-aware context limits (200k for Sonnet, 1M for Opus)
-- Real-time updates as Claude Code writes to session files
-- Press `q` to quit
+The bar fills up as your session grows. At 10x, clauditor blocks.
 
-## Impact tracking
+## Session history
 
 ```bash
-clauditor impact
+clauditor sessions
 ```
 
-See what clauditor has done for you — all numbers provable from your JSONL session data:
+See where your tokens went:
 
 ```
-clauditor impact
-───────────────────────────────────────────────────────
-  Monitoring since: 4/2/2026  (7 days)
-  Sessions monitored: 107
-  Total turns tracked: 8,421
-
-  SESSION HEALTH
-  ──────────────
-  Healthy sessions:     87%
-  Average cache ratio:  94.2%
-
-  ISSUES CAUGHT
-  ─────────────
-  3 cache degradations     — sessions reprocessing context from scratch
-  1 loop blocked           — Claude retrying the same failing action
-  2 context saves          — saved progress before compaction
-
-  Total: 6 issues caught across 107 sessions
+Sessions from last 7 days (70 total):
+────────────────────────────────────────────────────────────────────────
+  api-service (feat/variable-agent)  opus-4-6    889 turns  cache: 100%  ~$645
+    ⚠ 16x waste — blocked by clauditor
+  api-service (feat/variable-agent)  opus-4-6      5 turns  cache: 99%     ~$1
+  api-service (feat/agentic-file)    opus-4-6    779 turns  cache: 100%  ~$563
+  api-service (fix/delete-test-cases) opus-4-6   321 turns  cache: 100%   ~$68
 ```
 
 ## All commands
@@ -155,52 +169,39 @@ clauditor impact
 |---|---|
 | `clauditor install` | Register hooks into Claude Code (one-time) |
 | `clauditor uninstall` | Remove hooks |
-| `clauditor watch` | Live TUI dashboard |
-| `clauditor status` | Quick one-line health check (no TUI) |
-| `clauditor impact` | Lifetime stats — what clauditor has caught |
+| `clauditor watch` | Live dashboard showing waste factor |
+| `clauditor sessions` | See where your tokens went |
+| `clauditor status` | Quick health check (no TUI) |
+| `clauditor impact` | Lifetime stats |
 | `clauditor activity` | Recent actions log |
-| `clauditor stats` | Historical usage analysis (7 days default) |
-| `clauditor doctor` | Scan recent sessions for cache bugs |
-| `clauditor check-memory` | Audit CLAUDE.md token footprint and quota impact |
-
-### Options
-
-```bash
-clauditor watch --project ./my-project   # Watch a specific project
-clauditor watch --all                    # Watch all projects
-clauditor status --json                  # Machine-readable health check
-clauditor stats --days 30                # Stats for last 30 days
-clauditor stats --json                   # Machine-readable stats
-clauditor doctor --json                  # Machine-readable diagnostics
-clauditor impact --json                  # Machine-readable impact stats
-clauditor activity --json                # Machine-readable activity log
-clauditor activity -n 50                 # Show last 50 events
-```
+| `clauditor stats` | Historical usage analysis |
+| `clauditor doctor` | Scan for cache bugs |
+| `clauditor suggest-skill` | Find repeating workflows |
 
 ## Configuration
 
-Create a `.clauditorrc` file in your project or home directory:
+Session rotation is on by default. Configure at `~/.clauditor/rotation-config.json`:
 
 ```json
 {
-  "pricing": {
-    "model": "claude-sonnet-4-6",
-    "inputPerMillion": 3.00,
-    "outputPerMillion": 15.00,
-    "cacheCreationPerMillion": 3.75,
-    "cacheReadPerMillion": 0.30
-  },
-  "alerts": {
-    "cacheBugThreshold": 3,
-    "loopDetectionThreshold": 3,
-    "claudeMdTokenWarning": 4000,
-    "desktopNotifications": true
-  },
-  "bashFilter": {
-    "enabled": true,
-    "maxOutputChars": 2000,
-    "preservePatterns": ["error", "warn", "fail", "exception"]
-  },
+  "enabled": true,
+  "writeToClaudeMd": false,
+  "threshold": 100000,
+  "minTurns": 30
+}
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Enable/disable session rotation |
+| `writeToClaudeMd` | `false` | Write session state to CLAUDE.md (off by default — uses ~/.clauditor/ instead) |
+| `threshold` | `100000` | Tokens/turn average to trigger rotation |
+| `minTurns` | `30` | Minimum turns before rotation can trigger |
+
+Additional config via `.clauditorrc` or `clauditor.config.js` ([cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)):
+
+```json
+{
   "watch": {
     "projectsDir": "~/.claude/projects",
     "pollInterval": 1000
@@ -208,19 +209,60 @@ Create a `.clauditorrc` file in your project or home directory:
 }
 ```
 
-Also supports `clauditor.config.js`, `clauditor.config.ts`, or a `"clauditor"` field in `package.json` via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig).
+## How it saves context
 
-## How it works
+When rotation triggers, clauditor saves to `~/.clauditor/last-session.md`:
 
-Claude Code writes session transcripts as JSONL to `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. Each line is a JSON record — user messages, assistant responses with token usage, tool calls, and results.
+```markdown
+# Last Session (saved by clauditor)
 
-clauditor registers hooks via `clauditor install` into `~/.claude/settings.json`:
+- **Branch:** feat/variable-agent
+- **Project:** /Users/alice/projects/api-service
+- **Session size:** 889 turns, 395k tokens/turn
+- **Waste factor:** 16x
+- **Files modified:** FileAgent.cs, ServiceCollectionExtensions.cs, +13 more
+```
 
-- **SessionStart** — injects health briefing when Claude Code launches
-- **PostToolUse** — checks session health after every tool call, compresses bash output, detects edit thrashing
-- **Stop** — blocks loops when the same tool calls repeat 3+ times
+On the next `SessionStart`, this is injected into Claude's context. Claude reads it and picks up where you left off. No CLAUDE.md modification, no git noise, no extra tokens per turn.
 
-The hooks receive JSON on stdin and output decisions to stdout — Claude Code's official extension mechanism. clauditor also watches the JSONL files with chokidar for the real-time dashboard.
+## Technical details
+
+**Why sessions get expensive:**
+
+Every Claude Code API call sends: `tools` → `system prompt` → `CLAUDE.md` → `conversation history`. The conversation history grows linearly. Cache makes the prefix cheap (cache_read), but the growing tail requires cache_create each turn.
+
+```
+API call = tools (cached) + system (cached) + history (grows every turn)
+```
+
+After 200 turns, the history alone can be 200k+ tokens. A fresh session resets this to near zero.
+
+**What clauditor monitors:**
+
+| Metric | Source | Formula |
+|---|---|---|
+| Tokens/turn | JSONL `usage` field | `input + output + cache_read + cache_create` |
+| Baseline | First 5 turns of session | Average tokens/turn |
+| Current | Last 5 turns of session | Average tokens/turn |
+| Waste factor | Derived | `current ÷ baseline` |
+
+**Hook communication:**
+
+| Hook | Mechanism | Why |
+|---|---|---|
+| `UserPromptSubmit` | `decision: "block"` | Stops prompt before processing |
+| `PostToolUse` | Exit code 2 + stderr | Blocking error — Claude acknowledges and stops |
+| `PreCompact` | File write | Saves state at exact compaction moment |
+| `SessionStart` | `additionalContext` | Injects previous session state |
+| `Stop` | `decision: "block"` | Prevents infinite loops |
+
+## Limitations
+
+- **Cannot reduce Claude Code's context assembly.** We observe and advise — we don't modify what Claude Code sends to the API.
+- **Cannot see quota.** Anthropic doesn't expose quota data. The waste factor is a proxy based on token growth.
+- **Cache reads may or may not count toward quota.** The exact quota accounting for Max plan subscribers is not published.
+- **Web sessions not supported.** Only CLI and IDE extensions write local JSONL files.
+- **Per-device only.** Sessions don't sync across machines.
 
 ## Development
 
@@ -228,27 +270,26 @@ The hooks receive JSON on stdin and output decisions to stdout — Claude Code's
 git clone https://github.com/IyadhKhalfallah/clauditor.git
 cd clauditor
 npm install
-npm test
+npm test        # 48 tests
 npm run build
-npm link  # makes `clauditor` available globally
+npm link        # makes `clauditor` available globally
 ```
 
 ## Legal
 
-This project is open source under the MIT license.
+MIT License. Not affiliated with or endorsed by Anthropic.
 
-- **No leaked source code** was referenced or used in this project
-- All features are derived from publicly documented behavior and independent observation
-- "clauditor" is a portmanteau of "Claude" + "auditor" used in a descriptive, nominative sense
-- Not affiliated with or endorsed by Anthropic
+- No leaked source code was referenced or used
+- All features derived from official docs, public community discussions, and independent observation
+- "clauditor" = "Claude" + "auditor", used in a descriptive, nominative sense
 
 ## Contributing
 
-Contributions welcome! Please follow these rules:
+Contributions welcome. Rules:
 
-- **No leaked source code.** Do not reference, port, or derive logic from any leaked or non-public Anthropic code.
-- **Knowledge sources must be attributable** to official docs, public community discussions, or independent behavioral observation.
-- **Clean-room implementation.** If unsure whether something came from non-public materials, do not contribute it. Describe the observed behavior instead.
+- **No leaked source code.** Do not reference or derive logic from non-public Anthropic code.
+- **Attributable knowledge only.** Official docs, public GitHub issues, community posts, or independent observation.
+- **Clean-room implementation.** If unsure about a knowledge source, don't contribute it.
 
 ## License
 
