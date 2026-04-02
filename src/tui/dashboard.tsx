@@ -83,8 +83,8 @@ export function Dashboard({ session }: DashboardProps) {
         <Text dimColor>~${cost.totalCost.toFixed(0)} API est.</Text>
       </Text>
 
-      {/* Alerts — only real problems */}
-      {!cacheOk && session.turns.length >= 3 && (
+      {/* Alerts — only real problems, not warmup */}
+      {!cacheOk && session.turns.length >= 10 && (
         <Box marginTop={1}>
           <Text color="red" bold>
             ● Cache broken — {(cacheRatio * 100).toFixed(0)}% hit rate (should be &gt;70%)

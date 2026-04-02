@@ -110,7 +110,19 @@ export function App({ store, projectPath }: AppProps) {
                       t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
                     ) / Math.min(10, s.turns.length)
                   : 0
-                const statusIcon = s.cacheHealth.status === 'healthy' ? '✓'
+                // Calculate waste factor for status icon
+                const sTurnTokens = s.turns.map((t) =>
+                  t.usage.input_tokens + t.usage.output_tokens +
+                  t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+                )
+                const sBaseline = sTurnTokens.length >= 5
+                  ? sTurnTokens.slice(0, 5).reduce((a, b) => a + b, 0) / 5
+                  : avgTok
+                const sWaste = sBaseline > 0 ? Math.round(avgTok / sBaseline) : 1
+
+                const statusIcon = s.turns.length < 5 ? '·'
+                  : sWaste >= 10 ? '⟲'
+                  : s.cacheHealth.status === 'healthy' ? '✓'
                   : s.cacheHealth.status === 'degraded' ? '⚠' : '✗'
 
                 return (
