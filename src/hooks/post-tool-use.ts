@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
@@ -527,7 +527,6 @@ function writeSessionState(sessionId: string, turns: TurnMetrics[], tokensPerTur
 function findTranscriptPathSync(sessionId: string): string | null {
   const projectsDir = resolve(homedir(), '.claude/projects')
   try {
-    const { readdirSync } = require('node:fs')
     const dirs = readdirSync(projectsDir, { withFileTypes: true })
     for (const dir of dirs) {
       if (!dir.isDirectory()) continue
