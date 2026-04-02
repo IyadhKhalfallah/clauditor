@@ -466,6 +466,29 @@ program
     console.log('')
   })
 
+// ─── clauditor activity ──────────────────────────────────────────
+
+program
+  .command('activity')
+  .description('Show recent clauditor actions — warnings injected, loops blocked, etc.')
+  .option('-n, --limit <n>', 'Number of events to show', '20')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { readActivity, formatActivity } = await import('./features/activity-log.js')
+    const limit = parseInt(options.limit) || 20
+    const events = await readActivity(limit)
+
+    if (options.json) {
+      console.log(JSON.stringify(events, null, 2))
+      return
+    }
+
+    console.log('\nclauditor activity')
+    console.log('─'.repeat(50))
+    console.log(formatActivity(events))
+    console.log('')
+  })
+
 // ─── clauditor hook <name> ───────────────────────────────────────
 
 const hookCmd = program

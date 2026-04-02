@@ -8,6 +8,7 @@ import { detectCacheDegradation } from '../features/cache-health.js'
 import { hasResumeBoundary } from '../features/resume-detector.js'
 import { detectResumeAnomaly } from '../features/resume-detector.js'
 import { estimateQuotaBurnRate } from '../features/quota-burn.js'
+import { logActivity } from '../features/activity-log.js'
 
 /**
  * PostToolUse hook handler.
@@ -45,6 +46,11 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
           `[clauditor]: \`${command}\` output compressed from ` +
           `${formatSize(result.originalLength)} to ${formatSize(result.compressedLength)}.`
         )
+        logActivity({
+          type: 'bash_compressed',
+          session: input.session_id.slice(0, 8),
+          message: `Compressed bash output: ${formatSize(result.originalLength)} → ${formatSize(result.compressedLength)}`,
+        }).catch(() => {})
       }
     }
   }
@@ -89,6 +95,11 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
         `The full conversation is being re-read from scratch each turn instead of using cache. ` +
         `Recommend telling the user to run /clear and re-state what they're working on, or start a fresh session.`
       )
+      logActivity({
+        type: 'cache_warning',
+        session: sessionId.slice(0, 8),
+        message: `Injected cache warning — ratio at ${(cacheHealth.lastCacheRatio * 100).toFixed(0)}%`,
+      }).catch(() => {})
     }
 
     // Check context window size — detect limit from actual usage
@@ -103,11 +114,16 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
 
     if (pct >= 95) {
       warnings.push(
-        `[clauditor WARNING]: Context window is ${pct}% full (${(contextSize / 1000).toFixed(0)}k / 200k tokens). ` +
+        `[clauditor WARNING]: Context window is ${pct}% full (${(contextSize / 1000).toFixed(0)}k tokens). ` +
         `Auto-compaction will happen soon — this will summarize and drop older context, ` +
         `which means you may lose track of earlier decisions, instructions, and file changes. ` +
         `Recommend telling the user to start a fresh session. Save any important context to CLAUDE.md first.`
       )
+      logActivity({
+        type: 'context_warning',
+        session: sessionId.slice(0, 8),
+        message: `Injected context warning — ${pct}% full (${(contextSize / 1000).toFixed(0)}k tokens)`,
+      }).catch(() => {})
     }
 
     // Check for resume anomaly (#38029, #40524)
@@ -120,6 +136,11 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
           `generated in a single turn after session resume. This is a known bug that can drain the user's entire quota. ` +
           `Recommend telling the user to start a fresh session instead of resuming.`
         )
+        logActivity({
+          type: 'resume_warning',
+          session: sessionId.slice(0, 8),
+          message: `Resume token explosion — ${(resumeAnomaly.outputTokenSpike / 1000).toFixed(0)}k output tokens in one turn`,
+        }).catch(() => {})
       }
       if (resumeAnomaly.cacheInvalidatedAfterResume) {
         warnings.push(
@@ -127,6 +148,11 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
           `Every turn is now reprocessing the full context from scratch instead of using cached tokens. ` +
           `This drains quota 10-20x faster than normal. Recommend telling the user to start a fresh session.`
         )
+        logActivity({
+          type: 'resume_warning',
+          session: sessionId.slice(0, 8),
+          message: 'Resume invalidated cache — reprocessing all context each turn',
+        }).catch(() => {})
       }
     }
 

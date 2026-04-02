@@ -6,6 +6,7 @@ import {
   saveImpactStats,
   updateImpactFromSessions,
 } from '../features/impact-tracker.js'
+import { logActivity } from '../features/activity-log.js'
 
 export interface DaemonOptions extends WatcherOptions {
   alerts?: Partial<AlertConfig>
@@ -45,6 +46,11 @@ function setupDesktopNotifications(store: SessionStore) {
         `Session ${sessionId.slice(0, 8)} is reprocessing history as new tokens. ` +
           `Run /clear or start a fresh session.`
       )
+      logActivity({
+        type: 'notification',
+        session: sessionId.slice(0, 8),
+        message: `Desktop notification: cache degradation on ${state.label}`,
+      }).catch(() => {})
     }
 
     const loopKey = `${state.filePath}:loop`
@@ -55,6 +61,11 @@ function setupDesktopNotifications(store: SessionStore) {
         `Session ${sessionId.slice(0, 8)}: ${state.loopState.loopPattern || 'repeated tool calls'} ` +
           `(${state.loopState.consecutiveIdenticalTurns}x).`
       )
+      logActivity({
+        type: 'notification',
+        session: sessionId.slice(0, 8),
+        message: `Desktop notification: loop detected on ${state.label}`,
+      }).catch(() => {})
     }
   })
 }

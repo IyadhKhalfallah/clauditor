@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import type { StopHookInput, HookDecision, SessionRecord, AssistantRecord } from '../types.js'
 import { createHash } from 'node:crypto'
+import { logActivity } from '../features/activity-log.js'
 
 /**
  * Stop hook handler — detects compaction loops and blocks further execution.
@@ -77,6 +78,12 @@ function analyzeForLoop(input: StopHookInput): HookDecision {
       .filter((b) => b.type === 'tool_use')
       .map((b) => b.name)
       .join(', ')
+
+    logActivity({
+      type: 'loop_blocked',
+      session: input.session_id.slice(0, 8),
+      message: `Blocked loop — ${lastTools || 'tool'} call(s) repeated ${consecutiveCount}x with identical output`,
+    }).catch(() => {})
 
     return {
       decision: 'block',
