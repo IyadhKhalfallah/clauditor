@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.1...v1.0.2) (2026-04-02)
+
+
+### Bug Fixes
+
+* model-aware context limits and smarter burn rate classification ([47c70a4](https://github.com/IyadhKhalfallah/clauditor/commit/47c70a402e213843109f54281b1412006290d59a))
+* wire up q key and ctrl+c to quit the TUI ([39159d3](https://github.com/IyadhKhalfallah/clauditor/commit/39159d333424465dd2d7e34b60040aa0298fb8c4))
+
 ## [1.0.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.0...v1.0.1) (2026-04-02)
 
 
