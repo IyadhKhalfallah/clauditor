@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.2...v1.1.3) (2026-04-02)
+
+
+### Bug Fixes
+
+* enable polling mode for file watching — FSEvents unreliable on macOS ([874c403](https://github.com/IyadhKhalfallah/clauditor/commit/874c4039f681abddfee6f48485abf17948032367))
+* only flag burn rate when cache is also degraded ([4941803](https://github.com/IyadhKhalfallah/clauditor/commit/494180380bcffc38c60def15999970559a57a0f6))
+* watch directory directly instead of glob — chokidar v4 glob broken ([8680917](https://github.com/IyadhKhalfallah/clauditor/commit/868091758c9661121b07aabc814145d22e9f8520))
+
 ## [1.1.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.1...v1.1.2) (2026-04-02)
 
 
