@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.8.0...v1.9.0) (2026-04-02)
+
+
+### Features
+
+* redesign dashboard — one bar, one number, no contradictions ([a69e03f](https://github.com/IyadhKhalfallah/clauditor/commit/a69e03f933cf173fbf5b8aee915572ed563b4a20))
+
 ## [1.8.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.3...v1.8.0) (2026-04-02)
 
 
