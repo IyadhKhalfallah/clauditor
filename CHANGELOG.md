@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.2...v1.7.3) (2026-04-02)
+
+
+### Bug Fixes
+
+* add error logging to session state writer for debugging write failures ([742c70e](https://github.com/IyadhKhalfallah/clauditor/commit/742c70e14365527bba92cb7a36ead3b3344a5498))
+
 ## [1.7.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.1...v1.7.2) (2026-04-02)
 
 
