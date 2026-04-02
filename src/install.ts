@@ -1,5 +1,6 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, copyFile, access } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 
 const SETTINGS_PATH = resolve(homedir(), '.claude/settings.json')
@@ -85,8 +86,88 @@ export async function installHooks(): Promise<string[]> {
   await writeSettings(settings)
   messages.push(`\nSettings written to ${SETTINGS_PATH}`)
 
+  // Install the /save-skill skill to ~/.claude/skills/save-skill/
+  const skillMessages = await installSaveSkill()
+  messages.push(...skillMessages)
+
   return messages
 }
+
+/**
+ * Install the /save-skill skill to the user's personal skills directory.
+ */
+async function installSaveSkill(): Promise<string[]> {
+  const messages: string[] = []
+  const skillDir = resolve(homedir(), '.claude/skills/save-skill')
+  const skillPath = resolve(skillDir, 'SKILL.md')
+
+  try {
+    // Check if already installed
+    try {
+      await access(skillPath)
+      messages.push('/save-skill: already installed (skipped)')
+      return messages
+    } catch {
+      // Not installed yet
+    }
+
+    await mkdir(skillDir, { recursive: true })
+
+    // Find the bundled SKILL.md — it's in the package's skills/ directory
+    const __dirname = dirname(fileURLToPath(import.meta.url))
+    const bundledSkill = resolve(__dirname, '..', 'src', 'skills', 'save-skill', 'SKILL.md')
+
+    // Try bundled location first, fall back to writing inline
+    try {
+      await access(bundledSkill)
+      await copyFile(bundledSkill, skillPath)
+    } catch {
+      // Bundled file not found (running from dist/) — write it directly
+      const skillContent = SAVE_SKILL_CONTENT
+      await writeFile(skillPath, skillContent)
+    }
+
+    messages.push('/save-skill: ✓ installed to ~/.claude/skills/save-skill/')
+  } catch (err) {
+    messages.push(`/save-skill: ⚠ failed to install — ${err}`)
+  }
+
+  return messages
+}
+
+const SAVE_SKILL_CONTENT = `---
+name: save-skill
+description: Save what we just did as a reusable skill. Use at the end of a session to capture a workflow, technique, or process that you want to repeat.
+disable-model-invocation: true
+---
+
+The user wants to save what was done in this session as a reusable Claude Code skill.
+
+## Steps
+
+1. **Review the session**: Look at what was accomplished — the tools used, files modified, commands run, and the overall workflow.
+
+2. **Identify the reusable pattern**: What was the core workflow or technique? Strip away project-specific details and extract the generalizable process.
+
+3. **Ask the user**:
+   - "What should this skill be called?" (suggest a name based on what was done)
+   - "Should this be a project skill (.claude/skills/) or a personal skill (~/.claude/skills/)?"
+   - "Should only you be able to invoke it, or should Claude use it automatically when relevant?"
+
+4. **Create the skill**: Write the SKILL.md file with:
+   - YAML frontmatter: name, description, and \\\`disable-model-invocation: true\\\` if user-only
+   - Clear step-by-step instructions based on what was done
+   - Use \\\`$ARGUMENTS\\\` for any variable parts (file names, branch names, etc.)
+   - Keep it under 500 lines — move detailed reference to supporting files if needed
+
+5. **Verify**: Show the user the created skill and explain how to invoke it with /skill-name.
+
+## Important
+
+- Don't include project-specific file paths — use patterns like "src/routes/" not absolute paths
+- Include any commands that should be run (test, lint, build)
+- If the workflow has multiple variants, use $ARGUMENTS to parameterize
+`
 
 /**
  * Remove clauditor hooks from ~/.claude/settings.json.
@@ -126,6 +207,17 @@ export async function uninstallHooks(): Promise<string[]> {
 
   await writeSettings(settings)
   messages.push(`\nSettings written to ${SETTINGS_PATH}`)
+
+  // Remove /save-skill
+  const skillPath = resolve(homedir(), '.claude/skills/save-skill/SKILL.md')
+  try {
+    await access(skillPath)
+    const { rm } = await import('node:fs/promises')
+    await rm(resolve(homedir(), '.claude/skills/save-skill'), { recursive: true })
+    messages.push('/save-skill: ✓ removed')
+  } catch {
+    // Not installed
+  }
 
   return messages
 }
