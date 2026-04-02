@@ -53,6 +53,13 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
         }).catch(() => {})
       }
     }
+
+    // 1b. Post-error guidance — catch failing commands at attempt 1
+    // instead of waiting for the loop blocker at attempt 3.
+    const errorGuidance = detectBashError(input.session_id, toolResponse)
+    if (errorGuidance) {
+      parts.push(errorGuidance)
+    }
   }
 
   // 2. Detect repeated edits to the same file — a sign of thrashing
@@ -229,6 +236,57 @@ async function findTranscriptPath(sessionId: string): Promise<string | null> {
     // Projects dir may not exist
   }
   return null
+}
+
+/**
+ * Detect bash command errors and provide guidance BEFORE Claude retries.
+ *
+ * This is the proactive version of the loop blocker — catches the problem
+ * at attempt 1 instead of attempt 3. Only fires once per unique error
+ * per session to avoid nagging.
+ */
+const ERROR_PATTERNS = [
+  /error:/i,
+  /Error:/,
+  /ENOENT/,
+  /EACCES/,
+  /EPERM/,
+  /command not found/,
+  /No such file or directory/,
+  /Permission denied/,
+  /Cannot find module/,
+  /FATAL/,
+  /panic:/,
+  /Traceback \(most recent/,
+  /SyntaxError/,
+  /TypeError/,
+  /ReferenceError/,
+  /ModuleNotFoundError/,
+  /exit code [1-9]/i,
+  /npm ERR!/,
+  /failed with exit code/i,
+]
+
+/**
+ * Detect bash errors and inject guidance before Claude retries blindly.
+ *
+ * Fires on every error — hooks are separate processes so we can't dedup
+ * in memory. This is intentional: consistent "read the error" guidance
+ * on every failure is how you'd coach a developer. It's not spam.
+ */
+function detectBashError(sessionId: string, output: string): string | null {
+  if (!output || output.length < 20) return null
+
+  const hasError = ERROR_PATTERNS.some((p) => p.test(output))
+  if (!hasError) return null
+
+  return (
+    `[clauditor]: The previous command produced an error. Before retrying:\n` +
+    `1. Read the error output carefully — the fix is usually in the message\n` +
+    `2. If you've already tried this approach and it failed, try a different one\n` +
+    `3. If you're unsure, explain the error to the user and ask for guidance\n` +
+    `Do not retry the same command without changing something.`
+  )
 }
 
 /**
