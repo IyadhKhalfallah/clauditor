@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.1...v1.7.2) (2026-04-02)
+
+
+### Bug Fixes
+
+* use imported readdirSync instead of require() in ESM hook ([967cfc5](https://github.com/IyadhKhalfallah/clauditor/commit/967cfc53efd8aa84a2ed159086b998dc7cf83f22))
+
 ## [1.7.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.0...v1.7.1) (2026-04-02)
 
 
