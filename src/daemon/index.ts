@@ -1,6 +1,11 @@
 import { SessionStore } from './store.js'
 import { SessionWatcher, type WatcherOptions } from './watcher.js'
 import type { AlertConfig } from '../types.js'
+import {
+  loadImpactStats,
+  saveImpactStats,
+  updateImpactFromSessions,
+} from '../features/impact-tracker.js'
 
 export interface DaemonOptions extends WatcherOptions {
   alerts?: Partial<AlertConfig>
@@ -15,6 +20,8 @@ export async function startDaemon(options: DaemonOptions = {}) {
   if (desktopNotifications) {
     setupDesktopNotifications(store)
   }
+
+  setupImpactTracking(store)
 
   await watcher.start()
 
@@ -49,6 +56,29 @@ function setupDesktopNotifications(store: SessionStore) {
           `(${state.loopState.consecutiveIdenticalTurns}x).`
       )
     }
+  })
+}
+
+/**
+ * Periodically persist impact stats as sessions are monitored.
+ * Debounced to avoid writing to disk on every single update.
+ */
+function setupImpactTracking(store: SessionStore) {
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+  store.onUpdate(() => {
+    if (saveTimer) return
+    saveTimer = setTimeout(async () => {
+      saveTimer = null
+      try {
+        const sessions = store.getAll()
+        let stats = await loadImpactStats()
+        stats = updateImpactFromSessions(stats, sessions)
+        await saveImpactStats(stats)
+      } catch {
+        // Non-critical — stats will catch up next time
+      }
+    }, 10_000) // Save at most every 10 seconds
   })
 }
 

@@ -425,6 +425,47 @@ program
     }
   })
 
+// ─── clauditor impact ────────────────────────────────────────────
+
+program
+  .command('impact')
+  .description('Show lifetime stats — what clauditor has caught for you')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const config = await loadConfig()
+    const { SessionStore } = await import('./daemon/store.js')
+    const { SessionWatcher } = await import('./daemon/watcher.js')
+    const {
+      loadImpactStats,
+      saveImpactStats,
+      updateImpactFromSessions,
+      formatImpactStats,
+    } = await import('./features/impact-tracker.js')
+
+    // Scan current sessions and update impact stats
+    const store = new SessionStore()
+    const watcher = new SessionWatcher(store, {
+      projectsDir: config.watch.projectsDir,
+    })
+
+    if (!options.json) console.log('Scanning session files...')
+    await watcher.scanAll()
+
+    const sessions = store.getAll()
+    let stats = await loadImpactStats()
+    stats = updateImpactFromSessions(stats, sessions)
+    await saveImpactStats(stats)
+
+    if (options.json) {
+      const { countedSessions, ...publicStats } = stats
+      console.log(JSON.stringify(publicStats, null, 2))
+      return
+    }
+
+    console.log('\n' + formatImpactStats(stats))
+    console.log('')
+  })
+
 // ─── clauditor hook <name> ───────────────────────────────────────
 
 const hookCmd = program
