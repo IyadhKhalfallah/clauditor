@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.12.0...v1.12.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* single config file at ~/.clauditor/config.json ([c1a34e7](https://github.com/IyadhKhalfallah/clauditor/commit/c1a34e7d8f9230cc37c64d47d6df073f327deef2))
+
 ## [1.12.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.11.1...v1.12.0) (2026-04-02)
 
 
