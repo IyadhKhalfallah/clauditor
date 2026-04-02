@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.3...v1.1.0) (2026-04-02)
+
+
+### Features
+
+* add activity log — track and display every action clauditor takes ([669806c](https://github.com/IyadhKhalfallah/clauditor/commit/669806c67031a14805e81fcd2f6b3749a0062a67))
+* add impact tracker — lifetime KPIs across all sessions ([d9b2c51](https://github.com/IyadhKhalfallah/clauditor/commit/d9b2c514539c9e6098c04d0f4131d3202ff3dc28))
+
 ## [1.0.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.2...v1.0.3) (2026-04-02)
 
 
