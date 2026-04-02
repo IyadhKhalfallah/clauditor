@@ -34,3 +34,4 @@ export { detectResumeAnomaly, hasResumeBoundary } from './features/resume-detect
 export { estimateQuotaBurnRate } from './features/quota-burn.js'
 export { loadImpactStats, updateImpactFromSessions, formatImpactStats } from './features/impact-tracker.js'
 export { logActivity, readActivity, formatActivity } from './features/activity-log.js'
+export { detectWorkflowPatterns, generateSkillSuggestions } from './features/skill-suggest.js'

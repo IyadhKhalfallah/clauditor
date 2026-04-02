@@ -492,6 +492,60 @@ program
     console.log('')
   })
 
+// ─── clauditor suggest-skill ─────────────────────────────────────
+
+program
+  .command('suggest-skill')
+  .description('Find repeating workflows and suggest saving them as skills')
+  .option('-p, --project <path>', 'Scan a specific project')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const config = await loadConfig()
+    const { SessionStore } = await import('./daemon/store.js')
+    const { SessionWatcher } = await import('./daemon/watcher.js')
+    const {
+      detectWorkflowPatterns,
+      generateSkillSuggestions,
+      formatSkillSuggestions,
+    } = await import('./features/skill-suggest.js')
+
+    const store = new SessionStore()
+    const watcher = new SessionWatcher(store, {
+      projectsDir: config.watch.projectsDir,
+      projectPath: options.project ? resolve(options.project) : undefined,
+    })
+
+    if (!options.json) console.log('Scanning session files for repeating workflows...')
+    await watcher.scanAll()
+
+    const sessions = store.getAll()
+    const patterns = detectWorkflowPatterns(sessions)
+    const suggestions = generateSkillSuggestions(patterns)
+
+    if (options.json) {
+      console.log(JSON.stringify(suggestions.map((s) => ({
+        name: s.name,
+        sessionCount: s.pattern.sessionCount,
+        steps: s.pattern.steps,
+        seenIn: s.pattern.seenIn,
+      })), null, 2))
+      return
+    }
+
+    console.log('\nSkill suggestions')
+    console.log('─'.repeat(55))
+
+    if (suggestions.length === 0) {
+      console.log('  No repeating workflows found yet.')
+      console.log('  Use Claude Code for a few more sessions — patterns emerge over time.')
+    } else {
+      console.log(formatSkillSuggestions(suggestions))
+      console.log('  To enable automatic suggestions, run: clauditor install')
+      console.log('  Claude will offer to create these skills at session start.')
+    }
+    console.log('')
+  })
+
 // ─── clauditor hook <name> ───────────────────────────────────────
 
 const hookCmd = program

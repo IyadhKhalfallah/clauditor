@@ -65,6 +65,23 @@ async function buildSessionStartContext(
         // No CLAUDE.md — that's fine
       }
     }
+    // Check for repeating workflows that could become skills
+    const { SessionStore } = await import('../daemon/store.js')
+    const { SessionWatcher } = await import('../daemon/watcher.js')
+    const { detectWorkflowPatterns, generateSkillSuggestions } = await import('../features/skill-suggest.js')
+
+    const store = new SessionStore()
+    const watcher = new SessionWatcher(store, { projectsDir })
+    await watcher.scanAll()
+
+    const sessions = store.getAll()
+    const patterns = detectWorkflowPatterns(sessions)
+    const suggestions = generateSkillSuggestions(patterns)
+
+    if (suggestions.length > 0) {
+      // Only inject the top suggestion to avoid noise
+      parts.push(suggestions[0].prompt)
+    }
   } catch {
     // Non-critical
   }
@@ -73,7 +90,7 @@ async function buildSessionStartContext(
     logActivity({
       type: 'notification',
       session: 'startup',
-      message: `Session start: injected health briefing (${parts.length} items)`,
+      message: `Session start: injected briefing (${parts.length} items${parts.length > 1 ? ', includes skill suggestion' : ''})`,
     }).catch(() => {})
   }
 
