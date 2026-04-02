@@ -40,15 +40,22 @@ export class SessionWatcher {
       ? resolve(this.projectsDir, encodeProjectPath(this.projectPath))
       : this.projectsDir
 
-    this.watcher = watch(`${watchDir}/**/*.jsonl`, {
+    // Watch the directory directly — chokidar v4 has issues with
+    // glob patterns like **/*.jsonl on some systems. Filter in handlers.
+    this.watcher = watch(watchDir, {
       persistent: true,
       ignoreInitial: true,
       usePolling: true,
       interval: this.pollInterval,
+      depth: 4,
     })
 
-    this.watcher.on('add', (filePath) => this.processFile(filePath))
-    this.watcher.on('change', (filePath) => this.processFileIncremental(filePath))
+    this.watcher.on('add', (filePath) => {
+      if (filePath.endsWith('.jsonl')) this.processFile(filePath)
+    })
+    this.watcher.on('change', (filePath) => {
+      if (filePath.endsWith('.jsonl')) this.processFileIncremental(filePath)
+    })
   }
 
   async stop(): Promise<void> {
