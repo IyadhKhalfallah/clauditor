@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.2.1...v1.3.0) (2026-04-02)
+
+
+### Features
+
+* split impact into "actions taken" vs "issues detected" ([ee2c51b](https://github.com/IyadhKhalfallah/clauditor/commit/ee2c51bfb1f944d87be148462ca44d3df72141b5))
+
 ## [1.2.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.2.0...v1.2.1) (2026-04-02)
 
 
