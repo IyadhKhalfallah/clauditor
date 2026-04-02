@@ -207,6 +207,36 @@ export function formatAuditResult(
 
   lines.push('')
   lines.push(`  Total footprint: ${result.totalTokens.toLocaleString()} tokens`)
+
+  // Quota impact section — this is what users actually care about
+  // Based on GitHub #24147: every message re-sends CLAUDE.md as cached context
+  lines.push('')
+  lines.push('  QUOTA IMPACT')
+  lines.push('  ─────────────')
+
+  // Per-message: CLAUDE.md tokens are sent as cache_read on every turn
+  const pctOfContext = ((result.totalTokens / 200_000) * 100).toFixed(1)
+  lines.push(`  Per message: ${result.totalTokens.toLocaleString()} cache tokens (${pctOfContext}% of context window)`)
+
+  // In a 100-message session, CLAUDE.md accounts for this many total cache reads
+  const sessionCacheReads = result.totalTokens * 100
+  lines.push(`  Per 100-turn session: ${(sessionCacheReads / 1_000_000).toFixed(1)}M cache read tokens from CLAUDE.md alone`)
+
+  // What percentage of your quota is just CLAUDE.md overhead?
+  // Based on #24147: cache reads were 99.93% of total usage
+  // Max 5x plan ≈ 5M tokens/window, so CLAUDE.md overhead as fraction:
+  const quotaPctPerSession = ((sessionCacheReads * 0.1) / 5_000_000 * 100).toFixed(1)
+  lines.push(`  Estimated quota overhead: ~${quotaPctPerSession}% of Max 5x plan per 100-turn session`)
+
+  if (result.totalTokens > 8000) {
+    lines.push('')
+    lines.push(`  ⚠ Your CLAUDE.md files use ${result.totalTokens.toLocaleString()} tokens — this is large.`)
+    lines.push(`    Every token in CLAUDE.md is re-sent on EVERY message as cached context.`)
+    lines.push(`    A 15k-token CLAUDE.md in a 100-message session = 1.5M cache reads just from instructions.`)
+    lines.push(`    This directly scales your quota usage even when you're doing the same amount of work.`)
+  }
+
+  lines.push('')
   lines.push(
     `  Cost per message (cache read):  $${result.costPerMessageCached.toFixed(4)}`
   )
@@ -223,9 +253,11 @@ export function formatAuditResult(
   if (result.hasOversizedFiles) {
     lines.push('')
     lines.push('─'.repeat(50))
-    lines.push('Recommendation: Refactor oversized CLAUDE.md to use the 3-layer pattern:')
-    lines.push('  MEMORY.md  → index of pointers only (~150 chars/entry)')
-    lines.push('  .claude/topics/<topic>.md → actual content, fetched on demand')
+    lines.push('Recommendation: Reduce your CLAUDE.md footprint.')
+    lines.push('  Option 1: Move detailed content to .claude/topics/<topic>.md')
+    lines.push('            Keep CLAUDE.md as a short index of pointers (~150 chars/entry)')
+    lines.push('  Option 2: Move rarely-needed rules to .claude/rules/ (loaded on demand)')
+    lines.push('  Option 3: Remove outdated entries — each line costs tokens on every message')
   }
 
   return lines.join('\n')

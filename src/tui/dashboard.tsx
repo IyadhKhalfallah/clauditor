@@ -74,6 +74,27 @@ export function Dashboard({ session }: DashboardProps) {
                   : '(reprocessing — slow)'}
             </Text>
           </Text>
+          {session.quotaBurnRate.tokensPerMinute > 0 && (
+            <Text>
+              Burn rate: <Text bold color={session.quotaBurnRate.burnRateStatus === 'critical' ? 'red' : session.quotaBurnRate.burnRateStatus === 'elevated' ? 'yellow' : 'green'}>
+                {(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min
+              </Text>
+              {session.quotaBurnRate.estimatedMinutesRemaining !== null && (
+                <Text dimColor>
+                  {' '}({session.quotaBurnRate.estimatedMinutesRemaining >= 60
+                    ? `~${(session.quotaBurnRate.estimatedMinutesRemaining / 60).toFixed(1)}h left`
+                    : `~${session.quotaBurnRate.estimatedMinutesRemaining}min left`})
+                </Text>
+              )}
+            </Text>
+          )}
+          {session.resumeAnomaly.resumeDetected && (
+            <Text>
+              Session: <Text color={session.resumeAnomaly.detected ? 'red' : 'yellow'}>
+                {session.resumeAnomaly.detected ? 'resumed (anomaly detected)' : 'resumed'}
+              </Text>
+            </Text>
+          )}
           <Text>
             Output: <Text bold>{session.totalUsage.output_tokens.toLocaleString()}</Text> tokens
             {'   '}

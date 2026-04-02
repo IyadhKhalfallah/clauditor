@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { readdir, stat } from 'node:fs/promises'
 import { parseJsonlFile, extractTurns, extractModel, extractSessionContext } from './parser.js'
+import { hasResumeBoundary } from '../features/resume-detector.js'
 import { SessionStore } from './store.js'
 
 export interface WatcherOptions {
@@ -98,9 +99,10 @@ export class SessionWatcher {
       const turns = extractTurns(records)
       const model = extractModel(records)
       const context = extractSessionContext(records)
+      const isResumed = hasResumeBoundary(records)
 
       if (turns.length > 0) {
-        this.store.update(sessionId, filePath, projectPath, turns, model, context)
+        this.store.update(sessionId, filePath, projectPath, turns, model, context, isResumed)
       }
     } catch {
       // Ignore corrupt or in-progress files

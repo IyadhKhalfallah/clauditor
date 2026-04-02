@@ -5,7 +5,9 @@ import type { PostToolUseHookInput, HookDecision } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
-import { estimateCost, getPricingForModel } from '../features/cost-tracker.js'
+import { hasResumeBoundary } from '../features/resume-detector.js'
+import { detectResumeAnomaly } from '../features/resume-detector.js'
+import { estimateQuotaBurnRate } from '../features/quota-burn.js'
 
 /**
  * PostToolUse hook handler.
@@ -103,6 +105,36 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
         `Auto-compaction will happen soon — this will summarize and drop older context, ` +
         `which means you may lose track of earlier decisions, instructions, and file changes. ` +
         `Recommend telling the user to start a fresh session. Save any important context to CLAUDE.md first.`
+      )
+    }
+
+    // Check for resume anomaly (#38029, #40524)
+    const isResumed = hasResumeBoundary(records)
+    if (isResumed) {
+      const resumeAnomaly = detectResumeAnomaly(turns, true)
+      if (resumeAnomaly.outputTokenSpike) {
+        warnings.push(
+          `[clauditor WARNING]: Resume token explosion detected — ${(resumeAnomaly.outputTokenSpike / 1000).toFixed(0)}k output tokens ` +
+          `generated in a single turn after session resume. This is a known bug that can drain the user's entire quota. ` +
+          `Recommend telling the user to start a fresh session instead of resuming.`
+        )
+      }
+      if (resumeAnomaly.cacheInvalidatedAfterResume) {
+        warnings.push(
+          `[clauditor WARNING]: Session resume has invalidated the prompt cache. ` +
+          `Every turn is now reprocessing the full context from scratch instead of using cached tokens. ` +
+          `This drains quota 10-20x faster than normal. Recommend telling the user to start a fresh session.`
+        )
+      }
+    }
+
+    // Check quota burn rate
+    const burnRate = estimateQuotaBurnRate(turns)
+    if (burnRate.burnRateStatus === 'critical') {
+      warnings.push(
+        `[clauditor WARNING]: Quota is draining fast — estimated ~${burnRate.estimatedMinutesRemaining}min remaining at current burn rate ` +
+        `(${(burnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min). ` +
+        `Recommend checking if cache is broken (run /clear if so) and avoiding large file reads or verbose bash commands.`
       )
     }
 

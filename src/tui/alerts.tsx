@@ -43,6 +43,53 @@ export function Alerts({ session }: AlertsProps) {
 function getAlerts(session: SessionState): Alert[] {
   const alerts: Alert[] = []
 
+  // Resume anomaly — token explosion on resume (#38029)
+  if (session.resumeAnomaly.detected && session.resumeAnomaly.outputTokenSpike) {
+    alerts.push({
+      level: 'red',
+      title: `Resume token explosion — ${(session.resumeAnomaly.outputTokenSpike / 1000).toFixed(0)}k output tokens in one turn`,
+      detail:
+        'This session generated an abnormal amount of output tokens after resume, likely without your input. ' +
+        'This is a known bug that can drain your entire quota in minutes.',
+      action: 'Start a fresh session instead of resuming. Avoid --resume and --continue flags until this is fixed upstream.',
+    })
+  }
+
+  // Resume cache invalidation (#40524)
+  if (session.resumeAnomaly.cacheInvalidatedAfterResume) {
+    alerts.push({
+      level: 'red',
+      title: 'Resume broke cache — session is reprocessing everything',
+      detail:
+        'Resuming this session invalidated the prompt cache. Every turn now re-reads your full context from scratch ' +
+        'instead of using cached tokens. This drains your quota 10-20x faster.',
+      action: 'Start a fresh session. The --resume flag is known to cause cache invalidation in some versions.',
+    })
+  }
+
+  // Quota burn rate — critical
+  if (session.quotaBurnRate.burnRateStatus === 'critical') {
+    const mins = session.quotaBurnRate.estimatedMinutesRemaining
+    alerts.push({
+      level: 'red',
+      title: `Quota draining fast — ~${mins}min remaining at current rate`,
+      detail:
+        `Burning ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min. ` +
+        'At this rate you\'ll hit your session limit very soon.',
+      action: 'Check if cache is broken (look above). If so, run /clear. Consider starting a fresh session.',
+    })
+  } else if (session.quotaBurnRate.burnRateStatus === 'elevated') {
+    const mins = session.quotaBurnRate.estimatedMinutesRemaining
+    const timeStr = mins && mins >= 60 ? `~${(mins / 60).toFixed(1)}h` : `~${mins}min`
+    alerts.push({
+      level: 'yellow',
+      title: `Elevated quota usage — ${timeStr} remaining at current rate`,
+      detail:
+        `Burning ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min, which is higher than usual.`,
+      action: 'Not urgent, but keep an eye on it. Large file reads and verbose bash output increase burn rate.',
+    })
+  }
+
   // Cache warming (expected on early turns)
   if (session.turns.length <= 2) {
     alerts.push({
@@ -53,8 +100,8 @@ function getAlerts(session: SessionState): Alert[] {
     })
   }
 
-  // Cache degradation — framed as slowness, not cost
-  if (session.cacheHealth.degradationDetected) {
+  // Cache degradation
+  if (session.cacheHealth.degradationDetected && !session.resumeAnomaly.cacheInvalidatedAfterResume) {
     alerts.push({
       level: 'red',
       title: 'Session is slow — cache is broken',
@@ -73,7 +120,7 @@ function getAlerts(session: SessionState): Alert[] {
     })
   }
 
-  // Loop detection — framed as wasted time
+  // Loop detection
   if (session.loopState.loopDetected) {
     alerts.push({
       level: 'red',
@@ -83,7 +130,7 @@ function getAlerts(session: SessionState): Alert[] {
     })
   }
 
-  // Context window — framed as losing memory
+  // Context window
   const lastTurn = session.turns[session.turns.length - 1]
   if (lastTurn) {
     const contextSize =

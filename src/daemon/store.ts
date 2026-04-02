@@ -1,6 +1,8 @@
-import type { SessionState, TokenUsage, CacheHealth, LoopState, TurnMetrics } from '../types.js'
+import type { SessionState, TokenUsage, TurnMetrics } from '../types.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
 import { detectLoop } from '../features/loop-detector.js'
+import { detectResumeAnomaly } from '../features/resume-detector.js'
+import { estimateQuotaBurnRate } from '../features/quota-burn.js'
 
 export class SessionStore {
   // Keyed by filePath (not sessionId) because subagent IDs like
@@ -22,7 +24,7 @@ export class SessionStore {
 
   /**
    * Update a session with new turn data. Recomputes derived state
-   * (cache health, loop detection) on each update.
+   * (cache health, loop detection, resume anomaly, burn rate) on each update.
    */
   update(
     sessionId: string,
@@ -30,11 +32,14 @@ export class SessionStore {
     projectPath: string,
     turns: TurnMetrics[],
     model: string | null = null,
-    context: { cwd: string | null; gitBranch: string | null; projectName: string | null } = { cwd: null, gitBranch: null, projectName: null }
+    context: { cwd: string | null; gitBranch: string | null; projectName: string | null } = { cwd: null, gitBranch: null, projectName: null },
+    isResumed: boolean = false
   ): SessionState {
     const totalUsage = this.aggregateUsage(turns)
     const cacheHealth = detectCacheDegradation(turns)
     const loopState = detectLoop(turns)
+    const resumeAnomaly = detectResumeAnomaly(turns, isResumed)
+    const quotaBurnRate = estimateQuotaBurnRate(turns)
 
     // Use the last turn's timestamp as lastUpdated, not scan time
     const lastTurnTimestamp = turns[turns.length - 1]?.timestamp
@@ -62,6 +67,8 @@ export class SessionStore {
       totalUsage,
       cacheHealth,
       loopState,
+      resumeAnomaly,
+      quotaBurnRate,
       lastUpdated,
     }
 

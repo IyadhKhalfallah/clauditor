@@ -89,6 +89,8 @@ export interface SessionState {
   totalUsage: TokenUsage
   cacheHealth: CacheHealth
   loopState: LoopState
+  resumeAnomaly: ResumeAnomaly
+  quotaBurnRate: QuotaBurnRate
   lastUpdated: Date
 }
 
@@ -117,6 +119,19 @@ export interface LoopState {
   loopDetected: boolean
   consecutiveIdenticalTurns: number
   loopPattern?: string
+}
+
+export interface ResumeAnomaly {
+  detected: boolean
+  resumeDetected: boolean
+  outputTokenSpike: number | null
+  cacheInvalidatedAfterResume: boolean
+}
+
+export interface QuotaBurnRate {
+  tokensPerMinute: number
+  estimatedMinutesRemaining: number | null
+  burnRateStatus: 'normal' | 'elevated' | 'critical'
 }
 
 // Configuration
