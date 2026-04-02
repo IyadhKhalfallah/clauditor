@@ -93,7 +93,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
 
 // Track when we last checked health per session to avoid checking on every tool call
 const lastHealthCheck = new Map<string, number>()
-const HEALTH_CHECK_INTERVAL_MS = 60_000 // check at most once per minute
+const HEALTH_CHECK_INTERVAL_MS = 30_000 // check every 30 seconds — fast enough to catch 20-min burnouts
 
 async function checkSessionHealth(sessionId: string): Promise<string | null> {
   const now = Date.now()
@@ -209,7 +209,40 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
       }
     }
 
-    // Check quota burn rate
+    // Check for token spike — the "my limit was hit in 20 min" detector.
+    // Compare the last turn's total tokens against the session average.
+    // If a single turn costs 5x+ the average, something is wrong NOW.
+    if (turns.length >= 3) {
+      const lastTurnTokens =
+        lastTurn.usage.input_tokens +
+        lastTurn.usage.output_tokens +
+        lastTurn.usage.cache_creation_input_tokens +
+        lastTurn.usage.cache_read_input_tokens
+
+      const avgTokens = turns.slice(0, -1).reduce((sum, t) => {
+        return sum + t.usage.input_tokens + t.usage.output_tokens +
+          t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+      }, 0) / (turns.length - 1)
+
+      if (avgTokens > 0 && lastTurnTokens > avgTokens * 5 && lastTurnTokens > 100_000) {
+        warnings.push(
+          `[clauditor ALERT — TOKEN SPIKE]: The last turn consumed ${(lastTurnTokens / 1000).toFixed(0)}k tokens, ` +
+          `which is ${(lastTurnTokens / avgTokens).toFixed(0)}x your session average of ${(avgTokens / 1000).toFixed(0)}k.\n\n` +
+          `This is abnormal and will drain the user's quota rapidly. TELL THE USER IMMEDIATELY:\n` +
+          `"Your last turn used ${(lastTurnTokens / 1000).toFixed(0)}k tokens — much more than usual. ` +
+          `This could drain your session limit quickly. Want me to investigate why, or should we start a fresh session?"\n\n` +
+          `Possible causes: cache invalidation after resume, large file accidentally included in context, ` +
+          `or a known Claude Code bug. Check if cache_creation_input_tokens is unusually high.`
+        )
+        logActivity({
+          type: 'burn_rate_warning',
+          session: sessionId.slice(0, 8),
+          message: `Token spike: ${(lastTurnTokens / 1000).toFixed(0)}k tokens in one turn (${(lastTurnTokens / avgTokens).toFixed(0)}x average)`,
+        }).catch(() => {})
+      }
+    }
+
+    // Check quota burn rate (overall trend)
     const burnRate = estimateQuotaBurnRate(turns)
     if (burnRate.burnRateStatus === 'critical') {
       warnings.push(
