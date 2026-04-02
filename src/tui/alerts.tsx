@@ -142,19 +142,19 @@ function getAlerts(session: SessionState): Alert[] {
     if (pct >= 100) {
       alerts.push({
         level: 'red',
-        title: `Context full — Claude is about to forget things (${pct}%)`,
+        title: `Context full — compaction imminent (${pct}%)`,
         detail:
-          'Auto-compaction will kick in soon. Claude will summarize and drop older context, ' +
-          'which means it may lose track of decisions, file changes, or instructions from earlier in the session.',
-        action: 'Start a fresh session now. If there\'s important context, tell Claude to save it to CLAUDE.md first.',
+          'Claude will auto-compact soon, erasing older context. This causes "compaction amnesia" — ' +
+          'Claude forgets decisions, file changes, and conventions from earlier in the session.',
+        action: 'clauditor is instructing Claude to save session progress to CLAUDE.md before compaction. Start a fresh session after.',
       })
     } else if (pct >= 80) {
       alerts.push({
         level: 'yellow',
         title: `Context filling up — ${pct}% used`,
         detail:
-          'This session is getting long. Claude will auto-compact soon, which can cause it to ' +
-          'lose track of earlier context and repeat work.',
+          'This session is getting long. When it hits ~95%, clauditor will automatically instruct Claude to ' +
+          'save key decisions to CLAUDE.md before compaction wipes them.',
         action: 'Good time to wrap up this task. Start a new session for the next task.',
       })
     }

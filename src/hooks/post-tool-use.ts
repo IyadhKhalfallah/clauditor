@@ -114,10 +114,17 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
 
     if (pct >= 95) {
       warnings.push(
-        `[clauditor WARNING]: Context window is ${pct}% full (${(contextSize / 1000).toFixed(0)}k tokens). ` +
-        `Auto-compaction will happen soon — this will summarize and drop older context, ` +
-        `which means you may lose track of earlier decisions, instructions, and file changes. ` +
-        `Recommend telling the user to start a fresh session. Save any important context to CLAUDE.md first.`
+        `[clauditor WARNING — ACTION REQUIRED]: Context window is ${pct}% full (${(contextSize / 1000).toFixed(0)}k tokens). ` +
+        `Auto-compaction is imminent and will erase older context from this session.\n\n` +
+        `BEFORE continuing with the user's task, you MUST do the following:\n` +
+        `1. Tell the user: "Context window is nearly full. Let me save our progress before compaction."\n` +
+        `2. Write a summary of the current session to CLAUDE.md (or append to it) including:\n` +
+        `   - Key architectural decisions made in this session\n` +
+        `   - Files modified and why\n` +
+        `   - Current task status and what remains to be done\n` +
+        `   - Any conventions or patterns established\n` +
+        `3. Then suggest the user start a fresh session with: "Start a new session — the context I just saved to CLAUDE.md will be loaded automatically."\n\n` +
+        `This prevents "compaction amnesia" — the #1 complaint from Claude Code users.`
       )
       logActivity({
         type: 'context_warning',
