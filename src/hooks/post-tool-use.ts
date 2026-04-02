@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import type { PostToolUseHookInput, HookDecision } from '../types.js'
+import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
@@ -253,6 +253,16 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
       )
     }
 
+    // SESSION ROTATION — the most impactful feature.
+    // When tokens per turn are consistently high, the session is too big.
+    // A fresh session would use 10x less quota for the same work.
+    // This isn't a warning — Claude acts: saves context and tells user to start fresh.
+    const rotationPrompt = checkSessionRotation(sessionId, turns)
+    if (rotationPrompt) {
+      // This takes priority over other warnings — prepend it
+      warnings.unshift(rotationPrompt)
+    }
+
     return warnings.length > 0 ? warnings.join('\n\n') : null
   } catch {
     return null
@@ -360,6 +370,73 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
     writeFileSync(NUDGE_FILE, JSON.stringify(state))
   } catch {}
   return null
+}
+
+/**
+ * Session rotation — the core value of clauditor.
+ *
+ * Data shows: a 454-turn session averages 219k tokens/turn = 99M total.
+ * Five 90-turn sessions doing the same work would use ~20M total.
+ * That's 5x less quota for identical output.
+ *
+ * When avg tokens/turn exceeds the threshold for enough turns,
+ * Claude saves context to CLAUDE.md and tells user to start fresh.
+ * Not a suggestion — an action.
+ */
+const ROTATION_TOKENS_THRESHOLD = 100_000  // avg tokens/turn to trigger
+const ROTATION_MIN_TURNS = 30             // don't trigger on short sessions
+const ROTATION_NUDGE_FILE = resolve(homedir(), '.clauditor', 'rotation-nudge.json')
+
+function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string | null {
+  if (turns.length < ROTATION_MIN_TURNS) return null
+
+  // Check if already nudged this session
+  let nudged: Record<string, boolean> = {}
+  try {
+    nudged = JSON.parse(readFileSync(ROTATION_NUDGE_FILE, 'utf-8'))
+  } catch {}
+  if (nudged[sessionId]) return null
+
+  // Calculate average tokens per turn over last 10 turns
+  const recentTurns = turns.slice(-10)
+  const avgTokens = recentTurns.reduce((sum, t) => {
+    return sum + t.usage.input_tokens + t.usage.output_tokens +
+      t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+  }, 0) / recentTurns.length
+
+  if (avgTokens < ROTATION_TOKENS_THRESHOLD) return null
+
+  // Mark as nudged
+  nudged[sessionId] = true
+  try {
+    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+    writeFileSync(ROTATION_NUDGE_FILE, JSON.stringify(nudged))
+  } catch {}
+
+  const freshEstimate = Math.round(avgTokens / 10 / 1000)
+  const currentK = Math.round(avgTokens / 1000)
+
+  logActivity({
+    type: 'context_warning',
+    session: sessionId.slice(0, 8),
+    message: `Session rotation triggered — ${currentK}k tokens/turn avg, recommended fresh start`,
+  }).catch(() => {})
+
+  return (
+    `[clauditor — SESSION ROTATION]: This session is using ${currentK}k tokens per turn. ` +
+    `A fresh session would use ~${freshEstimate}k per turn — ${Math.round(avgTokens / (freshEstimate * 1000))}x less quota for the same work.\n\n` +
+    `DO THIS NOW:\n` +
+    `1. Save the current session state to CLAUDE.md. Include:\n` +
+    `   - What task you're working on and current status\n` +
+    `   - Key decisions made in this session\n` +
+    `   - Files modified and why\n` +
+    `   - What remains to be done\n` +
+    `2. Tell the user: "This session has grown large (${turns.length} turns, ${currentK}k tokens/turn). ` +
+    `I've saved our progress to CLAUDE.md. Starting a fresh session will use ${Math.round(avgTokens / (freshEstimate * 1000))}x less of your quota ` +
+    `for the same work. Run \`claude\` to start fresh — I'll pick up exactly where we left off from CLAUDE.md."\n\n` +
+    `This is not optional — large sessions directly cause the "limit hit in 20 minutes" problem ` +
+    `that Claude Code users report. Rotating sessions is the single most effective way to preserve quota.`
+  )
 }
 
 const ERROR_PATTERNS = [
