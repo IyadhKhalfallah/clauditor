@@ -14,6 +14,12 @@ export interface ImpactStats {
   loopsDetected: number
   resumeAnomaliesCaught: number
   contextOverflowWarnings: number
+  editThrashingCaught: number
+  // Measurable data — things we can prove from JSONL
+  totalTurnsMonitored: number
+  healthySessionPct: number
+  avgCacheRatio: number
+  compactionsSaved: number
   // Track which sessions we've already counted to avoid double-counting
   countedSessions: string[]
 }
@@ -26,6 +32,11 @@ const EMPTY_STATS: ImpactStats = {
   loopsDetected: 0,
   resumeAnomaliesCaught: 0,
   contextOverflowWarnings: 0,
+  editThrashingCaught: 0,
+  totalTurnsMonitored: 0,
+  healthySessionPct: 0,
+  avgCacheRatio: 0,
+  compactionsSaved: 0,
   countedSessions: [],
 }
 

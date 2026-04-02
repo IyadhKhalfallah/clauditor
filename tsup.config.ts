@@ -20,6 +20,7 @@ export default defineConfig([
       'hooks/stop': 'src/hooks/stop.ts',
       'hooks/post-tool-use': 'src/hooks/post-tool-use.ts',
       'hooks/pre-tool-use': 'src/hooks/pre-tool-use.ts',
+      'hooks/session-start': 'src/hooks/session-start.ts',
     },
     format: ['esm'],
     target: 'node20',

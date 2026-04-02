@@ -20,6 +20,10 @@ interface HookCommand {
 }
 
 const CLAUDITOR_HOOKS: Record<string, HookEventConfig> = {
+  SessionStart: {
+    matcher: '',
+    hooks: [{ type: 'command', command: 'clauditor hook session-start' }],
+  },
   Stop: {
     matcher: '',
     hooks: [{ type: 'command', command: 'clauditor hook stop' }],

@@ -55,7 +55,18 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     }
   }
 
-  // 2. Check session health (rate-limited to avoid overhead on every call)
+  // 2. Detect repeated edits to the same file — a sign of thrashing
+  if (input.tool_name === 'Edit' || input.tool_name === 'Write') {
+    const filePath = (input.tool_input?.file_path as string) || ''
+    if (filePath) {
+      const editWarning = trackFileEdits(input.session_id, filePath)
+      if (editWarning) {
+        parts.push(editWarning)
+      }
+    }
+  }
+
+  // 3. Check session health (rate-limited to avoid overhead on every call)
   const healthWarning = await checkSessionHealth(input.session_id)
   if (healthWarning) {
     parts.push(healthWarning)
@@ -217,6 +228,44 @@ async function findTranscriptPath(sessionId: string): Promise<string | null> {
   } catch {
     // Projects dir may not exist
   }
+  return null
+}
+
+/**
+ * Track file edit counts per session. When the same file is edited 5+ times,
+ * it's likely Claude is thrashing — iterating on code instead of stepping
+ * back to understand the design problem.
+ */
+const fileEditCounts = new Map<string, Map<string, number>>()
+const EDIT_THRASH_THRESHOLD = 5
+
+function trackFileEdits(sessionId: string, filePath: string): string | null {
+  if (!fileEditCounts.has(sessionId)) {
+    fileEditCounts.set(sessionId, new Map())
+  }
+  const counts = fileEditCounts.get(sessionId)!
+  const count = (counts.get(filePath) || 0) + 1
+  counts.set(filePath, count)
+
+  if (count === EDIT_THRASH_THRESHOLD) {
+    const fileName = filePath.split(/[/\\]/).pop() || filePath
+    logActivity({
+      type: 'cache_warning',
+      session: sessionId.slice(0, 8),
+      message: `Edit thrashing detected: ${fileName} edited ${count} times`,
+    }).catch(() => {})
+
+    return (
+      `[clauditor WARNING]: You've edited ${fileName} ${count} times this session. ` +
+      `This usually means you're iterating on implementation when the problem is architectural.\n\n` +
+      `STOP editing and do this instead:\n` +
+      `1. Explain to the user what you're trying to achieve with this file\n` +
+      `2. Ask if the current approach is correct before making more changes\n` +
+      `3. If the user confirms, continue. If not, step back and redesign.\n\n` +
+      `Repeated edits to the same file waste tokens and frustrate users.`
+    )
+  }
+
   return null
 }
 

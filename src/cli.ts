@@ -519,6 +519,13 @@ hookCmd
     await import('./hooks/pre-tool-use.js')
   })
 
+hookCmd
+  .command('session-start')
+  .description('SessionStart hook handler')
+  .action(async () => {
+    await import('./hooks/session-start.js')
+  })
+
 // ─── Config loader ───────────────────────────────────────────────
 
 async function loadConfig(): Promise<ClauditorConfig> {

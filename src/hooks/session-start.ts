@@ -1,0 +1,179 @@
+import { resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { readdir, stat } from 'node:fs/promises'
+import type { HookDecision } from '../types.js'
+import { parseJsonlFile, extractTurns, extractModel } from '../daemon/parser.js'
+import { detectCacheDegradation } from '../features/cache-health.js'
+import { hasResumeBoundary, detectResumeAnomaly } from '../features/resume-detector.js'
+import { logActivity } from '../features/activity-log.js'
+
+/**
+ * SessionStart hook handler.
+ *
+ * Fires when Claude Code starts a new session. Checks recent session
+ * history and injects context about:
+ * - Previous session health issues
+ * - Whether the last session was resumed (and if resume caused problems)
+ * - Saved context from CLAUDE.md (reminds Claude to read it)
+ *
+ * This is infrastructure, not information — Claude acts on it automatically.
+ */
+export async function handleSessionStartHook(): Promise<void> {
+  const input = await readStdin()
+  let hookInput: { session_id: string; cwd?: string }
+  try {
+    hookInput = JSON.parse(input)
+  } catch {
+    outputDecision({})
+    return
+  }
+
+  const context = await buildSessionStartContext(hookInput.cwd)
+  outputDecision(context)
+}
+
+async function buildSessionStartContext(
+  cwd?: string
+): Promise<HookDecision> {
+  const parts: string[] = []
+
+  try {
+    // Find recent sessions for this project
+    const projectsDir = resolve(homedir(), '.claude/projects')
+    const recentIssues = await checkRecentSessions(projectsDir)
+
+    if (recentIssues.length > 0) {
+      parts.push(
+        `[clauditor — session health briefing]:\n` +
+        `Before starting work, be aware of these issues from recent sessions:\n` +
+        recentIssues.map((issue) => `  - ${issue}`).join('\n') +
+        `\nIf the user is resuming a session with known issues, suggest starting fresh instead.`
+      )
+    }
+
+    // Remind Claude about CLAUDE.md context (addresses compaction amnesia)
+    if (cwd) {
+      const claudeMdPath = resolve(cwd, 'CLAUDE.md')
+      try {
+        await stat(claudeMdPath)
+        parts.push(
+          `[clauditor]: CLAUDE.md exists in this project. It may contain context saved from a previous session ` +
+          `(architectural decisions, task status, conventions). Read it carefully — it's there to prevent ` +
+          `re-explaining things that were already decided.`
+        )
+      } catch {
+        // No CLAUDE.md — that's fine
+      }
+    }
+  } catch {
+    // Non-critical
+  }
+
+  if (parts.length > 0) {
+    logActivity({
+      type: 'notification',
+      session: 'startup',
+      message: `Session start: injected health briefing (${parts.length} items)`,
+    }).catch(() => {})
+  }
+
+  if (parts.length === 0) return {}
+  return { additionalContext: parts.join('\n\n') }
+}
+
+/**
+ * Scan recent sessions for health issues worth warning about.
+ */
+async function checkRecentSessions(projectsDir: string): Promise<string[]> {
+  const issues: string[] = []
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
+
+  try {
+    const projectDirs = await readdir(projectsDir, { withFileTypes: true })
+
+    for (const dir of projectDirs) {
+      if (!dir.isDirectory()) continue
+      const projectPath = resolve(projectsDir, dir.name)
+
+      try {
+        const files = await readdir(projectPath)
+        const jsonlFiles = files.filter((f) => f.endsWith('.jsonl'))
+
+        // Only check the 5 most recent files to keep startup fast
+        const fileStats = await Promise.all(
+          jsonlFiles.slice(0, 10).map(async (f) => {
+            const fullPath = resolve(projectPath, f)
+            try {
+              const s = await stat(fullPath)
+              return { path: fullPath, mtime: s.mtimeMs }
+            } catch {
+              return null
+            }
+          })
+        )
+
+        const recent = fileStats
+          .filter((f): f is NonNullable<typeof f> => f !== null && f.mtime > oneDayAgo)
+          .sort((a, b) => b.mtime - a.mtime)
+          .slice(0, 5)
+
+        for (const file of recent) {
+          try {
+            const records = await parseJsonlFile(file.path)
+            const turns = extractTurns(records)
+            if (turns.length < 3) continue
+
+            const cacheHealth = detectCacheDegradation(turns)
+            if (cacheHealth.degradationDetected) {
+              issues.push(
+                `A recent session had broken cache (${(cacheHealth.lastCacheRatio * 100).toFixed(0)}% hit ratio). ` +
+                `If resuming it, expect slow responses and high quota usage.`
+              )
+            }
+
+            const isResumed = hasResumeBoundary(records)
+            if (isResumed) {
+              const anomaly = detectResumeAnomaly(turns, true)
+              if (anomaly.detected) {
+                issues.push(
+                  `A recent resumed session had anomalies (${anomaly.outputTokenSpike ? 'token explosion' : 'cache invalidation'}). ` +
+                  `Starting fresh is safer than resuming.`
+                )
+              }
+            }
+          } catch {
+            continue
+          }
+        }
+      } catch {
+        continue
+      }
+    }
+  } catch {
+    // Projects dir may not exist
+  }
+
+  // Deduplicate and limit
+  return [...new Set(issues)].slice(0, 3)
+}
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    process.stdin.setEncoding('utf-8')
+    process.stdin.on('data', (chunk) => (data += chunk))
+    process.stdin.on('end', () => resolve(data))
+    process.stdin.on('error', reject)
+  })
+}
+
+function outputDecision(decision: HookDecision): void {
+  process.stdout.write(JSON.stringify(decision))
+}
+
+// Run if invoked directly
+handleSessionStartHook().catch((err) => {
+  process.stderr.write(`clauditor session-start hook error: ${err}\n`)
+  process.stdout.write('{}')
+  process.exit(0)
+})
