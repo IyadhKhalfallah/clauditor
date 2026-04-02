@@ -84,7 +84,7 @@ export function updateImpactFromSessions(
       updated.resumeAnomaliesCaught++
     }
 
-    // Check for context overflow
+    // Check for context overflow (>= 90% of limit)
     const lastTurn = session.turns[session.turns.length - 1]
     if (lastTurn) {
       const contextSize =
@@ -97,7 +97,40 @@ export function updateImpactFromSessions(
         updated.contextOverflowWarnings++
       }
     }
+
+    // Aggregate measurable data
+    updated.totalTurnsMonitored += session.turns.length
+
+    if (session.turns.length >= 3) {
+      // Only count sessions with enough data for cache ratio
+      const ratio = session.cacheHealth.lastCacheRatio
+      if (ratio >= 0.7) {
+        // Count toward healthy sessions
+      }
+    }
   }
+
+  // Recompute aggregate KPIs from all sessions (not just new ones)
+  let healthyCount = 0
+  let totalRatio = 0
+  let sessionsWithRatio = 0
+
+  for (const session of sessions) {
+    if (session.turns.length >= 3) {
+      sessionsWithRatio++
+      totalRatio += session.cacheHealth.lastCacheRatio
+      if (session.cacheHealth.status === 'healthy') {
+        healthyCount++
+      }
+    }
+  }
+
+  updated.healthySessionPct = sessionsWithRatio > 0
+    ? Math.round((healthyCount / sessionsWithRatio) * 100)
+    : 0
+  updated.avgCacheRatio = sessionsWithRatio > 0
+    ? totalRatio / sessionsWithRatio
+    : 0
 
   updated.countedSessions = Array.from(counted)
   return updated
@@ -114,43 +147,52 @@ export function formatImpactStats(stats: ImpactStats): string {
   )
 
   lines.push('clauditor impact')
-  lines.push('─'.repeat(50))
+  lines.push('─'.repeat(55))
+
+  // Overview
   lines.push(`  Monitoring since: ${new Date(stats.firstSeen).toLocaleDateString()}  (${daysSince} day${daysSince === 1 ? '' : 's'})`)
   lines.push(`  Sessions monitored: ${stats.sessionsMonitored}`)
+  lines.push(`  Total turns tracked: ${stats.totalTurnsMonitored.toLocaleString()}`)
   lines.push('')
-  lines.push('  Issues caught:')
 
-  if (stats.cacheIssuesCaught > 0) {
-    lines.push(`    ● ${stats.cacheIssuesCaught} broken cache session${stats.cacheIssuesCaught === 1 ? '' : 's'} detected`)
-    lines.push(`      Each broken session wastes 10-20x more quota than normal.`)
-  }
+  // Session health — the headline KPIs
+  lines.push('  SESSION HEALTH')
+  lines.push('  ──────────────')
+  lines.push(`  Healthy sessions:     ${stats.healthySessionPct}%`)
+  lines.push(`  Average cache ratio:  ${(stats.avgCacheRatio * 100).toFixed(1)}%`)
+  lines.push('')
 
-  if (stats.loopsDetected > 0) {
-    lines.push(`    ● ${stats.loopsDetected} infinite loop${stats.loopsDetected === 1 ? '' : 's'} caught`)
-    lines.push(`      Each loop burns tokens on repeated failing actions.`)
-  }
-
-  if (stats.resumeAnomaliesCaught > 0) {
-    lines.push(`    ● ${stats.resumeAnomaliesCaught} resume anomal${stats.resumeAnomaliesCaught === 1 ? 'y' : 'ies'} flagged`)
-    lines.push(`      Resume bugs can drain your entire quota in minutes.`)
-  }
-
-  if (stats.contextOverflowWarnings > 0) {
-    lines.push(`    ● ${stats.contextOverflowWarnings} context overflow warning${stats.contextOverflowWarnings === 1 ? '' : 's'}`)
-    lines.push(`      Early warning before Claude loses track of your work.`)
-  }
-
+  // Issues caught — what clauditor did
   const totalIssues =
     stats.cacheIssuesCaught +
     stats.loopsDetected +
     stats.resumeAnomaliesCaught +
-    stats.contextOverflowWarnings
+    stats.contextOverflowWarnings +
+    stats.editThrashingCaught
+
+  lines.push('  ISSUES CAUGHT')
+  lines.push('  ─────────────')
 
   if (totalIssues === 0) {
-    lines.push('    No issues detected yet — your sessions have been healthy.')
+    lines.push('  No issues detected — your sessions have been healthy.')
   } else {
+    if (stats.cacheIssuesCaught > 0) {
+      lines.push(`  ${stats.cacheIssuesCaught} cache degradation${stats.cacheIssuesCaught === 1 ? '' : 's'}     — sessions reprocessing context from scratch`)
+    }
+    if (stats.loopsDetected > 0) {
+      lines.push(`  ${stats.loopsDetected} loop${stats.loopsDetected === 1 ? '' : 's'} blocked            — Claude retrying the same failing action`)
+    }
+    if (stats.resumeAnomaliesCaught > 0) {
+      lines.push(`  ${stats.resumeAnomaliesCaught} resume anomal${stats.resumeAnomaliesCaught === 1 ? 'y' : 'ies'}         — token explosion or cache break on resume`)
+    }
+    if (stats.contextOverflowWarnings > 0) {
+      lines.push(`  ${stats.contextOverflowWarnings} context save${stats.contextOverflowWarnings === 1 ? '' : 's'}          — saved progress before compaction`)
+    }
+    if (stats.editThrashingCaught > 0) {
+      lines.push(`  ${stats.editThrashingCaught} edit thrash${stats.editThrashingCaught === 1 ? '' : 'es'} redirected  — Claude stopped and asked to rethink approach`)
+    }
     lines.push('')
-    lines.push(`  Total issues caught: ${totalIssues} across ${stats.sessionsMonitored} sessions`)
+    lines.push(`  Total: ${totalIssues} issue${totalIssues === 1 ? '' : 's'} caught across ${stats.sessionsMonitored} sessions`)
   }
 
   return lines.join('\n')
