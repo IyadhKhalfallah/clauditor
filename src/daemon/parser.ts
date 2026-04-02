@@ -236,7 +236,8 @@ export function extractSessionContext(records: SessionRecord[]): SessionContext 
   }
 
   // Derive a short project name from the cwd
-  const projectName = cwd ? cwd.split('/').filter(Boolean).pop() ?? null : null
+  // Works on both Unix (/) and Windows (\) paths
+  const projectName = cwd ? cwd.split(/[/\\]/).filter(Boolean).pop() ?? null : null
 
   return { cwd, gitBranch, projectName }
 }

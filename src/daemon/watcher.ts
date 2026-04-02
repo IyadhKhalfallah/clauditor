@@ -1,5 +1,5 @@
 import { watch, type FSWatcher } from 'chokidar'
-import { resolve } from 'node:path'
+import { resolve, basename, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { readdir, stat } from 'node:fs/promises'
 import { parseJsonlFile, extractTurns, extractModel, extractSessionContext } from './parser.js'
@@ -119,14 +119,15 @@ export function encodeProjectPath(projectPath: string): string {
 }
 
 function extractSessionId(filePath: string): string {
-  const parts = filePath.split('/')
-  const filename = parts[parts.length - 1]
+  const filename = basename(filePath)
   return filename.replace('.jsonl', '')
 }
 
 function extractProjectPath(filePath: string, projectsDir: string): string {
-  const relative = filePath.replace(projectsDir + '/', '')
-  const parts = relative.split('/')
+  const relative = filePath
+    .replace(projectsDir + sep, '')
+    .replace(projectsDir + '/', '') // handle both separators
+  const parts = relative.split(sep)
   // First segment is the encoded project path
   return parts[0] || 'unknown'
 }
