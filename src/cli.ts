@@ -729,6 +729,7 @@ async function loadConfig(): Promise<ClauditorConfig> {
         alerts: { ...DEFAULT_CONFIG.alerts, ...result.config.alerts },
         bashFilter: { ...DEFAULT_CONFIG.bashFilter, ...result.config.bashFilter },
         watch: { ...DEFAULT_CONFIG.watch, ...result.config.watch },
+        rotation: { ...DEFAULT_CONFIG.rotation, ...result.config.rotation },
       }
     }
   } catch {

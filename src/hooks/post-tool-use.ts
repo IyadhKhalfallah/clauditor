@@ -383,12 +383,23 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
  * Claude saves context to CLAUDE.md and tells user to start fresh.
  * Not a suggestion — an action.
  */
-const ROTATION_TOKENS_THRESHOLD = 100_000  // avg tokens/turn to trigger
-const ROTATION_MIN_TURNS = 30             // don't trigger on short sessions
 const ROTATION_NUDGE_FILE = resolve(homedir(), '.clauditor', 'rotation-nudge.json')
+const ROTATION_CONFIG_FILE = resolve(homedir(), '.clauditor', 'rotation-config.json')
+
+function getRotationConfig(): { enabled: boolean; writeToClaudeMd: boolean; threshold: number; minTurns: number } {
+  const defaults = { enabled: true, writeToClaudeMd: true, threshold: 100_000, minTurns: 30 }
+  try {
+    const raw = JSON.parse(readFileSync(ROTATION_CONFIG_FILE, 'utf-8'))
+    return { ...defaults, ...raw }
+  } catch {
+    return defaults
+  }
+}
 
 function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string | null {
-  if (turns.length < ROTATION_MIN_TURNS) return null
+  const config = getRotationConfig()
+  if (!config.enabled) return null
+  if (turns.length < config.minTurns) return null
 
   // Check if already nudged this session
   let nudged: Record<string, boolean> = {}
@@ -404,7 +415,7 @@ function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string |
       t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
   }, 0) / recentTurns.length
 
-  if (avgTokens < ROTATION_TOKENS_THRESHOLD) return null
+  if (avgTokens < config.threshold) return null
 
   // Mark as nudged
   nudged[sessionId] = true
@@ -418,7 +429,9 @@ function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string |
   const ratio = Math.round(avgTokens / (freshEstimate * 1000))
 
   // Write session state to CLAUDE.md DIRECTLY — don't rely on Claude to do it
-  writeSessionState(sessionId, turns, currentK, ratio)
+  if (config.writeToClaudeMd) {
+    writeSessionState(sessionId, turns, currentK, ratio)
+  }
 
   logActivity({
     type: 'context_warning',

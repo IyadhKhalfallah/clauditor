@@ -90,7 +90,28 @@ export async function installHooks(): Promise<string[]> {
   const skillMessages = await installSaveSkill()
   messages.push(...skillMessages)
 
+  // Write rotation config so hooks can read it
+  await writeRotationConfig()
+  messages.push('Session rotation: ✓ enabled (writes to CLAUDE.md when sessions grow large)')
+
   return messages
+}
+
+async function writeRotationConfig(): Promise<void> {
+  const configDir = resolve(homedir(), '.clauditor')
+  const configPath = resolve(configDir, 'rotation-config.json')
+  await mkdir(configDir, { recursive: true })
+  // Only write if doesn't exist — don't overwrite user customizations
+  try {
+    await access(configPath)
+  } catch {
+    await writeFile(configPath, JSON.stringify({
+      enabled: true,
+      writeToClaudeMd: true,
+      threshold: 100000,
+      minTurns: 30,
+    }, null, 2) + '\n')
+  }
 }
 
 /**

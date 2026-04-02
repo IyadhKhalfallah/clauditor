@@ -143,6 +143,7 @@ export interface ClauditorConfig {
   alerts: AlertConfig
   bashFilter: BashFilterConfig
   watch: WatchConfig
+  rotation: RotationConfig
 }
 
 export interface PricingConfig {
@@ -170,6 +171,13 @@ export interface BashFilterConfig {
 export interface WatchConfig {
   projectsDir: string
   pollInterval: number
+}
+
+export interface RotationConfig {
+  enabled: boolean
+  writeToClaudeMd: boolean
+  tokensPerTurnThreshold: number
+  minTurns: number
 }
 
 // Hook I/O types
@@ -246,5 +254,11 @@ export const DEFAULT_CONFIG: ClauditorConfig = {
   watch: {
     projectsDir: '~/.claude/projects',
     pollInterval: 1000,
+  },
+  rotation: {
+    enabled: true,
+    writeToClaudeMd: true,
+    tokensPerTurnThreshold: 100_000,
+    minTurns: 30,
   },
 }
