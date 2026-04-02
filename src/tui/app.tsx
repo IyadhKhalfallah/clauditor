@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text, useApp, useInput } from 'ink'
 import type { SessionState } from '../types.js'
 import { SessionStore } from '../daemon/store.js'
 import { Dashboard } from './dashboard.js'
@@ -28,8 +28,15 @@ function filterAndSortSessions(sessions: SessionState[]): SessionState[] {
 }
 
 export function App({ store, projectPath }: AppProps) {
+  const { exit } = useApp()
   const [sessions, setSessions] = useState<SessionState[]>([])
   const [selectedSession, setSelectedSession] = useState<string | null>(null)
+
+  useInput((input, key) => {
+    if (input === 'q' || (key.ctrl && input === 'c')) {
+      exit()
+    }
+  })
 
   useEffect(() => {
     const refresh = () => {
