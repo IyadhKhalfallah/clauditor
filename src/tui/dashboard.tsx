@@ -83,13 +83,14 @@ export function Dashboard({ session }: DashboardProps) {
               Burn rate: <Text bold color={session.quotaBurnRate.burnRateStatus === 'critical' ? 'red' : session.quotaBurnRate.burnRateStatus === 'elevated' ? 'yellow' : 'green'}>
                 {(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min
               </Text>
-              {session.quotaBurnRate.estimatedMinutesRemaining !== null && (
-                <Text dimColor>
-                  {' '}({session.quotaBurnRate.estimatedMinutesRemaining >= 60
-                    ? `~${(session.quotaBurnRate.estimatedMinutesRemaining / 60).toFixed(1)}h left`
-                    : `~${session.quotaBurnRate.estimatedMinutesRemaining}min left`})
-                </Text>
-              )}
+              {' '}
+              <Text dimColor>
+                {session.quotaBurnRate.burnRateStatus === 'critical'
+                  ? '(unusually high)'
+                  : session.quotaBurnRate.burnRateStatus === 'elevated'
+                    ? '(above average)'
+                    : '(normal)'}
+              </Text>
             </Text>
           )}
           {session.resumeAnomaly.resumeDetected && (
@@ -107,18 +108,11 @@ export function Dashboard({ session }: DashboardProps) {
         </Box>
       </Box>
 
-      {/* Cost section — secondary, collapsed */}
+      {/* Cost section — only relevant for API users */}
       <Box flexDirection="column" marginTop={1}>
-        <Text bold underline>
-          USAGE
+        <Text dimColor>
+          API cost estimate: ~${cost.totalCost.toFixed(2)} · saved ~${cost.savedVsUncached.toFixed(2)} by cache
         </Text>
-        <Box flexDirection="column" paddingLeft={1} marginTop={1}>
-          <Text dimColor>
-            Est. cost: ~${cost.totalCost.toFixed(2)}
-            {'   '}
-            Saved by cache: ~${cost.savedVsUncached.toFixed(2)}
-          </Text>
-        </Box>
       </Box>
 
       {/* Alerts */}

@@ -67,27 +67,24 @@ function getAlerts(session: SessionState): Alert[] {
     })
   }
 
-  // Quota burn rate — critical
+  // Quota burn rate — based on absolute rate, not time estimates
+  // (Anthropic hasn't published quota mechanics, so we can't predict time remaining)
   if (session.quotaBurnRate.burnRateStatus === 'critical') {
-    const mins = session.quotaBurnRate.estimatedMinutesRemaining
-    const timeStr = mins !== null ? `~${mins}min remaining` : 'unusually high burn rate'
     alerts.push({
       level: 'red',
-      title: `Quota draining fast — ${timeStr}`,
+      title: `Unusually high token consumption — ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min`,
       detail:
-        `Burning ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min. ` +
-        'At this rate you\'ll hit your session limit very soon.',
-      action: 'Check if cache is broken (look above). If so, run /clear. Consider starting a fresh session.',
+        'This session is consuming tokens much faster than normal. ' +
+        'This usually means cache is broken (reprocessing everything) or there\'s a token generation bug.',
+      action: 'Check if cache is broken (look above). If so, run /clear. If the problem persists, start a fresh session.',
     })
   } else if (session.quotaBurnRate.burnRateStatus === 'elevated') {
-    const mins = session.quotaBurnRate.estimatedMinutesRemaining
-    const timeStr = mins && mins >= 60 ? `~${(mins / 60).toFixed(1)}h` : `~${mins}min`
     alerts.push({
       level: 'yellow',
-      title: `Elevated quota usage — ${timeStr} remaining at current rate`,
+      title: `Above-average token consumption — ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min`,
       detail:
-        `Burning ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min, which is higher than usual.`,
-      action: 'Not urgent, but keep an eye on it. Large file reads and verbose bash output increase burn rate.',
+        'This session is consuming tokens faster than typical. Could be normal for complex tasks, or a sign of cache inefficiency.',
+      action: 'Not urgent. Large file reads and verbose bash output increase consumption.',
     })
   }
 

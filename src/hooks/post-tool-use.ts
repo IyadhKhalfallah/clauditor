@@ -134,9 +134,10 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
     const burnRate = estimateQuotaBurnRate(turns)
     if (burnRate.burnRateStatus === 'critical') {
       warnings.push(
-        `[clauditor WARNING]: Quota is draining fast — estimated ~${burnRate.estimatedMinutesRemaining}min remaining at current burn rate ` +
-        `(${(burnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min). ` +
-        `Recommend checking if cache is broken (run /clear if so) and avoiding large file reads or verbose bash commands.`
+        `[clauditor WARNING]: Unusually high token consumption — ` +
+        `${(burnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min, which is much higher than normal. ` +
+        `This usually means cache is broken or there's a token generation bug. ` +
+        `Recommend checking cache health and running /clear if cache ratio is low.`
       )
     }
 
