@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.9.0...v1.9.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* use 12h window for session counter instead of midnight cutoff ([400e7b7](https://github.com/IyadhKhalfallah/clauditor/commit/400e7b7d09a8596638cefbe02876a2957862674c))
+
 ## [1.9.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.8.0...v1.9.0) (2026-04-02)
 
 
