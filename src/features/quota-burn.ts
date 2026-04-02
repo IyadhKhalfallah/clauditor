@@ -80,19 +80,24 @@ export function estimateQuotaBurnRate(
       ? remainingBudget / tokensPerMinute
       : null
 
-  // Classify burn rate by comparing to a "normal" baseline.
-  // Normal session: ~2-5k weighted tokens/min on Opus.
-  // Elevated: >15k/min (suggests cache issues or verbose output).
-  // Critical: >50k/min (almost certainly broken cache or token explosion).
+  // Classify burn rate. High throughput alone is NOT a problem — it just
+  // means Claude is working fast. Only flag when combined with low cache
+  // efficiency, which indicates wasted reprocessing.
+  //
+  // The burn rate status is advisory — the real signal comes from cache
+  // health. We compute it here but leave it to the alerts layer to
+  // combine with cache ratio before showing warnings.
+  const lastCacheRatio = recentTurns[recentTurns.length - 1]?.cacheRatio ?? 1
+
   let burnRateStatus: QuotaBurnRate['burnRateStatus'] = 'normal'
-  if (tokensPerMinute > 50_000) {
+  if (lastCacheRatio < 0.5 && tokensPerMinute > 30_000) {
+    // High burn + broken cache = critical
     burnRateStatus = 'critical'
-  } else if (tokensPerMinute > 15_000) {
+  } else if (lastCacheRatio < 0.5 && tokensPerMinute > 10_000) {
+    // Moderate burn + broken cache = elevated
     burnRateStatus = 'elevated'
-  } else if (estimatedMinutesRemaining !== null && estimatedMinutesRemaining < 30) {
+  } else if (estimatedMinutesRemaining !== null && estimatedMinutesRemaining < 30 && lastCacheRatio < 0.7) {
     burnRateStatus = 'critical'
-  } else if (estimatedMinutesRemaining !== null && estimatedMinutesRemaining < 120) {
-    burnRateStatus = 'elevated'
   }
 
   return {

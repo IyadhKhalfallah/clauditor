@@ -36,14 +36,24 @@ describe('estimateQuotaBurnRate', () => {
     expect(result.estimatedMinutesRemaining).toBeGreaterThan(0)
   })
 
-  it('flags critical burn rate when draining fast', () => {
-    // High output tokens = fast burn
+  it('flags critical burn rate when draining fast with low cache ratio', () => {
+    // High output + low cache ratio (cacheRead: 0) = broken cache + fast burn
     const turns = [
       makeTurn(2, { input: 1000, output: 100000, cacheRead: 0, cacheCreate: 50000 }),
       makeTurn(0, { input: 1000, output: 100000, cacheRead: 0, cacheCreate: 50000 }),
-    ]
+    ].map((t) => ({ ...t, cacheRatio: 0.02 })) // broken cache
     const result = estimateQuotaBurnRate(turns, 1_000_000)
     expect(result.burnRateStatus).toBe('critical')
+  })
+
+  it('shows normal for high burn rate with healthy cache', () => {
+    // High output but 100% cache = Claude just working fast, not a problem
+    const turns = [
+      makeTurn(2, { input: 100, output: 100000, cacheRead: 200000, cacheCreate: 1000 }),
+      makeTurn(0, { input: 100, output: 100000, cacheRead: 200000, cacheCreate: 1000 }),
+    ]
+    const result = estimateQuotaBurnRate(turns, 1_000_000)
+    expect(result.burnRateStatus).toBe('normal')
   })
 
   it('shows normal for low burn rate', () => {
