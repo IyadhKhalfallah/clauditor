@@ -444,10 +444,7 @@ function writeSessionState(sessionId: string, turns: TurnMetrics[], tokensPerTur
   try {
     // Find the cwd from the transcript
     const transcriptPath = findTranscriptPathSync(sessionId)
-    if (!transcriptPath) {
-      process.stderr.write(`clauditor: writeSessionState — no transcript found for ${sessionId}\n`)
-      return
-    }
+    if (!transcriptPath) return
 
     const content = readFileSync(transcriptPath, 'utf-8')
     const lines = content.split('\n')
@@ -465,10 +462,7 @@ function writeSessionState(sessionId: string, turns: TurnMetrics[], tokensPerTur
         }
       } catch {}
     }
-    if (!cwd) {
-      process.stderr.write(`clauditor: writeSessionState — no cwd found in transcript for ${sessionId}\n`)
-      return
-    }
+    if (!cwd) return
 
     const claudeMdPath = resolve(cwd, 'CLAUDE.md')
 
@@ -511,21 +505,16 @@ function writeSessionState(sessionId: string, turns: TurnMetrics[], tokensPerTur
       existing = readFileSync(claudeMdPath, 'utf-8')
     } catch {}
 
-    process.stderr.write(`clauditor: writing session state to ${claudeMdPath}\n`)
-
     if (existing.includes('Session State (auto-saved by clauditor)')) {
       existing = existing.replace(
         /\n## Session State \(auto-saved by clauditor\)[\s\S]*?(?=\n## |\n$|$)/,
         stateBlock
       )
       writeFileSync(claudeMdPath, existing)
-      process.stderr.write(`clauditor: replaced existing session state\n`)
     } else {
       appendFileSync(claudeMdPath, stateBlock)
-      process.stderr.write(`clauditor: appended session state\n`)
     }
-  } catch (err) {
-    process.stderr.write(`clauditor: writeSessionState error — ${err}\n`)
+  } catch {
   }
 }
 
