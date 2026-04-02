@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.2...v1.0.3) (2026-04-02)
+
+
+### Bug Fixes
+
+* remove unreliable time estimates, label cost as API-only ([fbd912d](https://github.com/IyadhKhalfallah/clauditor/commit/fbd912d9db6fca84be0ef4a207577e2ad2b45818))
+
 ## [1.0.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.1...v1.0.2) (2026-04-02)
 
 
