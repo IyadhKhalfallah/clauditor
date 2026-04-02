@@ -35,6 +35,18 @@ export function Dashboard({ session }: DashboardProps) {
   const contextLimitLabel = isOpus ? '1M' : '200k'
   const contextPct = Math.round((contextSize / contextLimit) * 100)
 
+  // Compute avg tokens per turn (last 10 turns for recent picture)
+  const recentTurns = session.turns.slice(-10)
+  const avgTokensPerTurn = recentTurns.length > 0
+    ? recentTurns.reduce((sum, t) =>
+        sum + t.usage.input_tokens + t.usage.output_tokens +
+        t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
+      ) / recentTurns.length
+    : 0
+  const rotationThreshold = 100_000
+  const rotationPct = Math.round((avgTokensPerTurn / rotationThreshold) * 100)
+  const willRotate = avgTokensPerTurn >= rotationThreshold && session.turns.length >= 30
+
   return (
     <Box flexDirection="column">
       {/* Header */}
@@ -52,12 +64,25 @@ export function Dashboard({ session }: DashboardProps) {
       {/* Cache Health */}
       <CachePanel session={session} />
 
-      {/* Session metrics — framed around efficiency, not just cost */}
+      {/* Session metrics */}
       <Box flexDirection="column" marginTop={1}>
         <Text bold underline>
           SESSION HEALTH
         </Text>
         <Box flexDirection="column" paddingLeft={1} marginTop={1}>
+          <Text>
+            Tokens/turn: <Text bold color={willRotate ? 'red' : rotationPct >= 70 ? 'yellow' : 'green'}>
+              {(avgTokensPerTurn / 1000).toFixed(0)}k
+            </Text>
+            {' '}
+            <Text dimColor>
+              {willRotate
+                ? '(rotation triggered — Claude will save context + suggest fresh start)'
+                : rotationPct >= 70
+                  ? `(${rotationPct}% to rotation threshold)`
+                  : '(efficient)'}
+            </Text>
+          </Text>
           <Text>
             Context window: <Text bold color={contextPct >= 90 ? 'red' : contextPct >= 70 ? 'yellow' : 'green'}>
               {contextPct}%
