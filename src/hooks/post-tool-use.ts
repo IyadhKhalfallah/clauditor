@@ -111,7 +111,9 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
 
     const warnings: string[] = []
 
-    // Check cache health
+    // Check cache health — two levels:
+    // 1. "Broken" = strict degradation pattern (flat reads + growing creates + <50%)
+    // 2. "Dropping" = ratio dropped significantly in recent turns (e.g. 98% → 68%)
     const cacheHealth = detectCacheDegradation(turns)
     if (cacheHealth.degradationDetected) {
       warnings.push(
@@ -125,6 +127,25 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
         session: sessionId.slice(0, 8),
         message: `Injected cache warning — ratio at ${(cacheHealth.lastCacheRatio * 100).toFixed(0)}%`,
       }).catch(() => {})
+    } else if (cacheHealth.status === 'degraded' && turns.length >= 5) {
+      // Check for a recent drop — was cache healthy a few turns ago?
+      const recentRatios = turns.slice(-6).map((t) => t.cacheRatio)
+      const peak = Math.max(...recentRatios.slice(0, 3))
+      const current = recentRatios[recentRatios.length - 1]
+      const dropped = peak > 0.85 && current < 0.7
+
+      if (dropped) {
+        warnings.push(
+          `[clauditor]: Cache efficiency dropped from ${(peak * 100).toFixed(0)}% to ${(current * 100).toFixed(0)}% ` +
+          `in the last few turns. This could be temporary (large tool output can cause a dip) or a sign ` +
+          `of cache invalidation. If it doesn't recover in the next 2-3 turns, suggest running /clear to the user.`
+        )
+        logActivity({
+          type: 'cache_warning',
+          session: sessionId.slice(0, 8),
+          message: `Cache drop detected: ${(peak * 100).toFixed(0)}% → ${(current * 100).toFixed(0)}%`,
+        }).catch(() => {})
+      }
     }
 
     // Check context window size — detect limit from actual usage
