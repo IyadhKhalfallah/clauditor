@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision } from '../types.js'
@@ -73,7 +74,13 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     }
   }
 
-  // 3. Check session health (rate-limited to avoid overhead on every call)
+  // 3. Suggest saving as a skill after a productive session
+  const skillNudge = checkSkillNudge(input.session_id, input.tool_name)
+  if (skillNudge) {
+    parts.push(skillNudge)
+  }
+
+  // 4. Check session health (rate-limited to avoid overhead on every call)
   const healthWarning = await checkSessionHealth(input.session_id)
   if (healthWarning) {
     parts.push(healthWarning)
@@ -245,6 +252,62 @@ async function findTranscriptPath(sessionId: string): Promise<string | null> {
  * at attempt 1 instead of attempt 3. Only fires once per unique error
  * per session to avoid nagging.
  */
+/**
+ * After a productive session (20+ tool calls with diverse tools),
+ * nudge Claude to suggest /save-skill. Fires once per session.
+ */
+const NUDGE_THRESHOLD = 20
+const NUDGE_FILE = resolve(homedir(), '.clauditor', 'skill-nudge.json')
+
+function checkSkillNudge(sessionId: string, toolName: string): string | null {
+  // Read and update nudge state synchronously (fast, small file)
+  let state: Record<string, { count: number; tools: string[]; nudged: boolean }> = {}
+  try {
+    state = JSON.parse(readFileSync(NUDGE_FILE, 'utf-8'))
+  } catch {
+    // File doesn't exist yet
+  }
+
+  if (!state[sessionId]) {
+    state[sessionId] = { count: 0, tools: [], nudged: false }
+  }
+
+  const session = state[sessionId]
+  session.count++
+  if (!session.tools.includes(toolName)) {
+    session.tools.push(toolName)
+  }
+
+  // Already nudged this session
+  if (session.nudged) {
+    try { writeFileSync(NUDGE_FILE, JSON.stringify(state)); } catch {}
+    return null
+  }
+
+  // Check if session is productive enough:
+  // 20+ tool calls AND at least 3 different tools (not just Read/Read/Read)
+  if (session.count >= NUDGE_THRESHOLD && session.tools.length >= 3) {
+    session.nudged = true
+    try {
+      mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+      writeFileSync(NUDGE_FILE, JSON.stringify(state))
+    } catch {}
+
+    return (
+      `[clauditor]: This has been a productive session (${session.count}+ actions across ${session.tools.length} tools). ` +
+      `If the workflow you just completed is something you'd want to repeat, ` +
+      `mention to the user: "Want me to save this workflow as a reusable skill? Just type /save-skill."\n` +
+      `Only mention this once. If the user isn't interested, continue normally.`
+    )
+  }
+
+  try {
+    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+    writeFileSync(NUDGE_FILE, JSON.stringify(state))
+  } catch {}
+  return null
+}
+
 const ERROR_PATTERNS = [
   /error:/i,
   /Error:/,
