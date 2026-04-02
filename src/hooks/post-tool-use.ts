@@ -462,12 +462,13 @@ function writeSessionState(sessionId: string, turns: TurnMetrics[], tokensPerTur
     const content = readFileSync(transcriptPath, 'utf-8')
     const lines = content.split('\n')
 
-    // Extract cwd from first user record
+    // Extract cwd and branch from the MOST RECENT user record
+    // Read from end for performance on large sessions
     let cwd: string | null = null
     let gitBranch: string | null = null
-    for (const line of lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
       try {
-        const r = JSON.parse(line)
+        const r = JSON.parse(lines[i])
         if (r.type === 'user' && r.cwd) {
           cwd = r.cwd
           gitBranch = r.gitBranch || null
