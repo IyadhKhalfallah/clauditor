@@ -1,0 +1,56 @@
+{
+  "name": "clauditor",
+  "version": "0.1.0",
+  "description": "Real-time token optimization and cache health daemon for Claude Code",
+  "type": "module",
+  "bin": {
+    "clauditor": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "token",
+    "cache",
+    "optimization",
+    "daemon",
+    "cli"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IyadhKhalfallah/clauditor.git"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3",
+    "commander": "^13.1.0",
+    "cosmiconfig": "^9.0.0",
+    "ink": "^5.1.0",
+    "node-notifier": "^10.0.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/node-notifier": "^8.0.5",
+    "@types/react": "^18.3.20",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  }
+}
