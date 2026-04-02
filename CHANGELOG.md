@@ -7,6 +7,13 @@
 
 * write session state to CLAUDE.md directly instead of asking Claude ([f1d3b4c](https://github.com/IyadhKhalfallah/clauditor/commit/f1d3b4c4c9a4396456af673a7e1dab735ba13d9e))
 
+## [1.7.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.0...v1.7.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* write session state to CLAUDE.md directly instead of asking Claude ([f1d3b4c](https://github.com/IyadhKhalfallah/clauditor/commit/f1d3b4c4c9a4396456af673a7e1dab735ba13d9e))
+
 ## [1.7.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.6.0...v1.7.0) (2026-04-02)
 
 
