@@ -12,6 +12,8 @@ It reads Claude Code's local JSONL session files and integrates with the officia
 
 **Supported platforms:** Claude Code CLI (`claude`), VS Code extension, JetBrains extension. Does **not** work with Claude Code on the web (claude.ai/code) — the web version doesn't write local session files or support hooks.
 
+**Multi-device:** clauditor monitors sessions per-device. If you work across multiple laptops, install clauditor on each one — hooks and impact stats are local to each machine.
+
 ## Install
 
 ```bash
