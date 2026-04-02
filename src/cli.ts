@@ -492,6 +492,141 @@ program
     console.log('')
   })
 
+// ─── clauditor sessions ──────────────────────────────────────────
+
+program
+  .command('sessions')
+  .description('List recent sessions — see where your tokens went')
+  .option('-d, --days <n>', 'Number of days to look back', '7')
+  .option('-p, --project <path>', 'Filter by project')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const config = await loadConfig()
+    const { SessionStore } = await import('./daemon/store.js')
+    const { SessionWatcher } = await import('./daemon/watcher.js')
+    const { estimateCost, getPricingForModel } = await import('./features/cost-tracker.js')
+
+    const store = new SessionStore()
+    const watcher = new SessionWatcher(store, {
+      projectsDir: config.watch.projectsDir,
+      projectPath: options.project ? resolve(options.project) : undefined,
+    })
+
+    if (!options.json) console.log('Scanning session files...')
+    await watcher.scanAll()
+
+    const daysAgo = parseInt(options.days) || 7
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - daysAgo)
+
+    const sessions = store.getAll()
+      .filter((s) => s.lastUpdated >= cutoff)
+      .sort((a, b) => b.lastUpdated.getTime() - a.lastUpdated.getTime())
+
+    if (sessions.length === 0) {
+      if (options.json) console.log('[]')
+      else console.log('No sessions found.')
+      return
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(sessions.map((s) => {
+        const pricing = s.model ? getPricingForModel(s.model) : undefined
+        const cost = estimateCost(s.totalUsage, pricing)
+        const lastTurn = s.turns[s.turns.length - 1]
+
+        // Find token spike turns
+        const avgTokens = s.turns.reduce((sum, t) =>
+          sum + t.usage.input_tokens + t.usage.output_tokens +
+          t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
+        ) / (s.turns.length || 1)
+        const spikeTurns = s.turns.filter((t) => {
+          const total = t.usage.input_tokens + t.usage.output_tokens +
+            t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+          return total > avgTokens * 3 && total > 100_000
+        })
+
+        return {
+          label: s.label,
+          model: s.model,
+          turns: s.turns.length,
+          lastUpdated: s.lastUpdated.toISOString(),
+          cacheStatus: s.cacheHealth.status,
+          cacheRatio: s.cacheHealth.lastCacheRatio,
+          cost: cost.totalCost,
+          spikeTurns: spikeTurns.length,
+        }
+      }), null, 2))
+      return
+    }
+
+    console.log(`\nSessions from last ${daysAgo} days (${sessions.length} total):`)
+    console.log('─'.repeat(80))
+
+    for (const s of sessions) {
+      const pricing = s.model ? getPricingForModel(s.model) : undefined
+      const cost = estimateCost(s.totalUsage, pricing)
+      const modelShort = s.model?.replace('claude-', '').split('-2')[0] || '?'
+      const lastTurn = s.turns[s.turns.length - 1]
+
+      // Cache ratio color
+      const ratio = s.cacheHealth.lastCacheRatio
+      const ratioStr = `${(ratio * 100).toFixed(0)}%`
+      const cacheLabel = ratio >= 0.7 ? `\x1b[32m${ratioStr}\x1b[0m`
+        : ratio >= 0.4 ? `\x1b[33m${ratioStr}\x1b[0m`
+        : `\x1b[31m${ratioStr}\x1b[0m`
+
+      // Find expensive turns (token spikes)
+      const avgTokens = s.turns.reduce((sum, t) =>
+        sum + t.usage.input_tokens + t.usage.output_tokens +
+        t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
+      ) / (s.turns.length || 1)
+      const spikeTurns = s.turns.filter((t) => {
+        const total = t.usage.input_tokens + t.usage.output_tokens +
+          t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+        return total > avgTokens * 3 && total > 100_000
+      })
+
+      // Time
+      const timeStr = formatTimeAgo(s.lastUpdated)
+
+      console.log(
+        `  ${s.label.slice(0, 35).padEnd(35)} ${modelShort.padEnd(10)} ` +
+        `${String(s.turns.length).padStart(4)} turns  cache: ${cacheLabel.padEnd(15)}` +
+        `~$${cost.totalCost.toFixed(2).padStart(8)}  ${timeStr}`
+      )
+
+      // Show spike warning
+      if (spikeTurns.length > 0) {
+        const maxSpike = Math.max(...spikeTurns.map((t) =>
+          t.usage.input_tokens + t.usage.output_tokens +
+          t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+        ))
+        console.log(
+          `  \x1b[31m  ⚠ ${spikeTurns.length} token spike${spikeTurns.length === 1 ? '' : 's'} detected ` +
+          `(largest: ${(maxSpike / 1000).toFixed(0)}k tokens in one turn, avg: ${(avgTokens / 1000).toFixed(0)}k)\x1b[0m`
+        )
+      }
+
+      // Show if cache was degraded
+      if (s.cacheHealth.status === 'degraded' || s.cacheHealth.status === 'broken') {
+        console.log(
+          `  \x1b[33m  ⚠ Cache ${s.cacheHealth.status} — likely burned extra quota\x1b[0m`
+        )
+      }
+    }
+
+    console.log('')
+  })
+
+function formatTimeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
+  return `${Math.floor(seconds / 86400)}d ago`
+}
+
 // ─── clauditor suggest-skill ─────────────────────────────────────
 
 program
