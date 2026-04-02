@@ -27,6 +27,20 @@ export async function handlePostToolUseHook(): Promise<void> {
   const hookInput = JSON.parse(input) as PostToolUseHookInput
 
   const decision = await processToolResult(hookInput)
+
+  // If it's a block decision, use exit code 2 — stderr is fed back
+  // to Claude as feedback. This is stronger than decision: "block"
+  // which Claude can interpret as a tool error and retry.
+  if (decision && 'decision' in decision && decision.decision === 'block') {
+    process.stderr.write(
+      (decision as { reason?: string }).reason ||
+      'clauditor: session too large, start a fresh session'
+    )
+    process.stdout.write('{}')
+    process.exit(2)
+    return
+  }
+
   outputDecision(decision)
 }
 
