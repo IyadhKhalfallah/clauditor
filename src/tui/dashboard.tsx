@@ -2,8 +2,8 @@ import React from 'react'
 import { Box, Text } from 'ink'
 import type { SessionState } from '../types.js'
 import { CachePanel } from './cache-panel.js'
-import { Alerts } from './alerts.js'
 import { estimateCost, getPricingForModel } from '../features/cost-tracker.js'
+import { readActivity, type ActivityEvent } from '../features/activity-log.js'
 
 interface DashboardProps {
   session: SessionState
@@ -22,20 +22,18 @@ export function Dashboard({ session }: DashboardProps) {
   const displayPath = session.cwd || decodeProjectPath(session.projectPath)
   const modelShort = session.model?.replace('claude-', '').split('-2')[0] || 'unknown'
 
-  // Compute context window usage from last turn
   const lastTurn = session.turns[session.turns.length - 1]
   const contextSize = lastTurn
     ? lastTurn.usage.input_tokens +
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
     : 0
-  // Context window varies by model: Opus 4.6 supports up to 1M with extended context
   const isOpus = session.model?.includes('opus') ?? false
   const contextLimit = isOpus ? 1_000_000 : 200_000
   const contextLimitLabel = isOpus ? '1M' : '200k'
   const contextPct = Math.round((contextSize / contextLimit) * 100)
 
-  // Compute avg tokens per turn (last 10 turns for recent picture)
+  // Avg tokens per turn (last 10)
   const recentTurns = session.turns.slice(-10)
   const avgTokensPerTurn = recentTurns.length > 0
     ? recentTurns.reduce((sum, t) =>
@@ -44,8 +42,15 @@ export function Dashboard({ session }: DashboardProps) {
       ) / recentTurns.length
     : 0
   const rotationThreshold = 100_000
-  const rotationPct = Math.round((avgTokensPerTurn / rotationThreshold) * 100)
+  const rotationPct = Math.min(100, Math.round((avgTokensPerTurn / rotationThreshold) * 100))
   const willRotate = avgTokensPerTurn >= rotationThreshold && session.turns.length >= 30
+
+  // Rotation progress bar
+  const barWidth = 30
+  const filled = Math.round((rotationPct / 100) * barWidth)
+  const empty = barWidth - filled
+  const rotationBar = '█'.repeat(filled) + '░'.repeat(empty)
+  const rotationColor = willRotate ? 'red' : rotationPct >= 70 ? 'yellow' : 'green'
 
   return (
     <Box flexDirection="column">
@@ -54,94 +59,68 @@ export function Dashboard({ session }: DashboardProps) {
         <Text>
           <Text bold>{session.label}</Text>
           {'  '}
-          <Text dimColor>{modelShort}</Text>
-          {'  '}
-          <Text dimColor>{session.turns.length} turns</Text>
+          <Text dimColor>{modelShort} · {session.turns.length} turns</Text>
         </Text>
         <Text dimColor>{displayPath}</Text>
       </Box>
 
-      {/* Cache Health */}
-      <CachePanel session={session} />
-
-      {/* Session metrics */}
-      <Box flexDirection="column" marginTop={1}>
-        <Text bold underline>
-          SESSION HEALTH
+      {/* The one number that matters: tokens per turn → rotation threshold */}
+      <Box flexDirection="column" marginBottom={1}>
+        <Text>
+          <Text bold>{(avgTokensPerTurn / 1000).toFixed(0)}k</Text> tokens/turn
+          {'  '}
+          {willRotate ? (
+            <Text color="red" bold>ROTATION TRIGGERED — context saved to CLAUDE.md</Text>
+          ) : (
+            <Text dimColor>{rotationPct}% to rotation</Text>
+          )}
         </Text>
-        <Box flexDirection="column" paddingLeft={1} marginTop={1}>
-          <Text>
-            Tokens/turn: <Text bold color={willRotate ? 'red' : rotationPct >= 70 ? 'yellow' : 'green'}>
-              {(avgTokensPerTurn / 1000).toFixed(0)}k
-            </Text>
-            {' '}
-            <Text dimColor>
-              {willRotate
-                ? '(rotation triggered — Claude will save context + suggest fresh start)'
-                : rotationPct >= 70
-                  ? `(${rotationPct}% to rotation threshold)`
-                  : '(efficient)'}
-            </Text>
+        <Text color={rotationColor}>
+          {rotationBar}
+        </Text>
+        {willRotate && (
+          <Text color="cyan">→ Start a fresh session with `claude` to use {Math.round(avgTokensPerTurn / 10000)}x less quota per turn</Text>
+        )}
+      </Box>
+
+      {/* Key metrics — one line each */}
+      <Box flexDirection="column">
+        <Text>
+          Cache: <Text color={session.cacheHealth.lastCacheRatio >= 0.7 ? 'green' : 'red'}>
+            {(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}%
           </Text>
-          <Text>
-            Context window: <Text bold color={contextPct >= 90 ? 'red' : contextPct >= 70 ? 'yellow' : 'green'}>
-              {contextPct}%
-            </Text>
-            {' '}
-            <Text dimColor>({(contextSize / 1000).toFixed(0)}k / {contextLimitLabel} tokens)</Text>
+          {'  '}
+          Context: <Text color={contextPct >= 90 ? 'red' : contextPct >= 70 ? 'yellow' : 'green'}>
+            {contextPct}%
           </Text>
-          <Text>
-            Cache efficiency: <Text bold color={session.cacheHealth.lastCacheRatio >= 0.7 ? 'green' : session.cacheHealth.lastCacheRatio >= 0.4 ? 'yellow' : 'red'}>
-              {(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}%
-            </Text>
-            {' '}
-            <Text dimColor>
-              {session.cacheHealth.lastCacheRatio >= 0.7
-                ? '(fast responses)'
-                : session.cacheHealth.lastCacheRatio >= 0.4
-                  ? '(slower than normal)'
-                  : '(reprocessing — slow)'}
-            </Text>
-          </Text>
-          {session.quotaBurnRate.tokensPerMinute > 0 && (
-            <Text>
-              Burn rate: <Text bold color={session.quotaBurnRate.burnRateStatus === 'critical' ? 'red' : session.quotaBurnRate.burnRateStatus === 'elevated' ? 'yellow' : 'green'}>
-                {(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min
-              </Text>
-              {' '}
-              <Text dimColor>
-                {session.quotaBurnRate.burnRateStatus === 'critical'
-                  ? '(unusually high)'
-                  : session.quotaBurnRate.burnRateStatus === 'elevated'
-                    ? '(above average)'
-                    : '(normal)'}
-              </Text>
-            </Text>
-          )}
-          {session.resumeAnomaly.resumeDetected && (
-            <Text>
-              Session: <Text color={session.resumeAnomaly.detected ? 'red' : 'yellow'}>
-                {session.resumeAnomaly.detected ? 'resumed (anomaly detected)' : 'resumed'}
-              </Text>
-            </Text>
-          )}
-          <Text>
-            Output: <Text bold>{session.totalUsage.output_tokens.toLocaleString()}</Text> tokens
-            {'   '}
-            <Text dimColor>{session.turns.length} turns this session</Text>
+          <Text dimColor> ({(contextSize / 1000).toFixed(0)}k / {contextLimitLabel})</Text>
+          {'  '}
+          <Text dimColor>~${cost.totalCost.toFixed(0)} API est.</Text>
+        </Text>
+      </Box>
+
+      {/* Alerts — only show if something is actually wrong */}
+      {session.cacheHealth.status !== 'healthy' && session.cacheHealth.status !== 'unknown' && (
+        <Box marginTop={1}>
+          <Text color="red" bold>
+            ● Cache {session.cacheHealth.status} — {(session.cacheHealth.lastCacheRatio * 100).toFixed(0)}% hit rate
           </Text>
         </Box>
-      </Box>
-
-      {/* Cost section — only relevant for API users */}
-      <Box flexDirection="column" marginTop={1}>
-        <Text dimColor>
-          API cost estimate: ~${cost.totalCost.toFixed(2)} · saved ~${cost.savedVsUncached.toFixed(2)} by cache
-        </Text>
-      </Box>
-
-      {/* Alerts */}
-      <Alerts session={session} />
+      )}
+      {session.loopState.loopDetected && (
+        <Box>
+          <Text color="red" bold>
+            ● Loop — {session.loopState.loopPattern} repeated {session.loopState.consecutiveIdenticalTurns}x
+          </Text>
+        </Box>
+      )}
+      {session.resumeAnomaly.detected && (
+        <Box>
+          <Text color="red" bold>
+            ● Resume anomaly — {session.resumeAnomaly.outputTokenSpike ? 'token explosion' : 'cache invalidated'}
+          </Text>
+        </Box>
+      )}
     </Box>
   )
 }
