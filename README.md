@@ -36,6 +36,12 @@ clauditor doctor
 # View usage stats for the past week
 clauditor stats
 
+# See what clauditor has done for you
+clauditor impact
+
+# See recent actions (warnings injected, loops blocked, etc.)
+clauditor activity
+
 # Audit your CLAUDE.md token footprint
 clauditor check-memory
 ```
@@ -153,6 +159,52 @@ A PostToolUse hook that summarizes verbose bash output to reduce token waste:
 - Keeps only error/warning/failure lines from build output
 - Truncates to configurable max length (default 2000 chars)
 
+### Resume safety
+
+Detects two known bugs with `--resume` and `--continue` flags:
+
+- **Token explosion** (GitHub #38029): 652K+ output tokens generated silently on session resume, draining entire quota in minutes
+- **Cache invalidation** (GitHub #40524): resume injects tool attachments at wrong position, invalidating the entire prompt cache
+
+### Impact tracking
+
+```bash
+clauditor impact
+```
+
+Shows lifetime stats — what clauditor has caught across all your sessions:
+
+```
+clauditor impact
+──────────────────────────────────────
+  Monitoring since: 4/2/2026  (7 days)
+  Sessions monitored: 107
+
+  Issues caught:
+    ● 5 broken cache sessions detected
+    ● 2 infinite loops caught
+    ● 1 resume anomaly flagged
+    ● 3 context overflow warnings
+  Total issues caught: 11 across 107 sessions
+```
+
+### Activity log
+
+```bash
+clauditor activity
+```
+
+See every action clauditor has taken — warnings injected into Claude's context, loops blocked, bash output compressed:
+
+```
+  2m ago     ⚡ Injected cache warning — ratio at 12%
+  15m ago    🛑 Blocked loop — Bash call(s) repeated 4x
+  1h ago     🔔 Desktop notification: cache degradation on api-service (dev)
+  3h ago     📦 Compressed bash output: 12.4k chars → 1.8k chars
+```
+
+Also visible in the TUI dashboard as a live feed.
+
 ### Usage statistics
 
 ```bash
@@ -172,6 +224,8 @@ Historical breakdown showing:
 |---|---|
 | `clauditor watch` | Live TUI dashboard for active sessions |
 | `clauditor status` | Quick one-line health check (no TUI) |
+| `clauditor impact` | Lifetime stats — what clauditor has caught |
+| `clauditor activity` | Recent actions log |
 | `clauditor install` | Register hooks in `~/.claude/settings.json` |
 | `clauditor uninstall` | Remove hooks |
 | `clauditor stats` | Historical usage analysis (7 days default) |
@@ -187,6 +241,9 @@ clauditor status --json                  # Machine-readable health check
 clauditor stats --days 30                # Stats for last 30 days
 clauditor stats --json                   # Machine-readable stats
 clauditor doctor --json                  # Machine-readable diagnostics
+clauditor impact --json                  # Machine-readable impact stats
+clauditor activity --json                # Machine-readable activity log
+clauditor activity -n 50                 # Show last 50 events
 ```
 
 ## Configuration
