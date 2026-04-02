@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import type { SessionState } from '../types.js'
+import { readActivity } from './activity-log.js'
 
 const IMPACT_DIR = resolve(homedir(), '.clauditor')
 const IMPACT_FILE = resolve(IMPACT_DIR, 'impact.json')
@@ -9,18 +10,19 @@ const IMPACT_FILE = resolve(IMPACT_DIR, 'impact.json')
 export interface ImpactStats {
   firstSeen: string
   lastUpdated: string
+  // From session scans (detected)
   sessionsMonitored: number
-  cacheIssuesCaught: number
-  loopsDetected: number
-  resumeAnomaliesCaught: number
-  contextOverflowWarnings: number
-  editThrashingCaught: number
-  // Measurable data — things we can prove from JSONL
   totalTurnsMonitored: number
   healthySessionPct: number
   avgCacheRatio: number
-  compactionsSaved: number
-  // Track which sessions we've already counted to avoid double-counting
+  // Detected in historical data
+  detected: {
+    cacheIssues: number
+    loops: number
+    resumeAnomalies: number
+    contextOverflows: number
+  }
+  // Track which sessions we've already counted
   countedSessions: string[]
 }
 
@@ -28,15 +30,15 @@ const EMPTY_STATS: ImpactStats = {
   firstSeen: new Date().toISOString(),
   lastUpdated: new Date().toISOString(),
   sessionsMonitored: 0,
-  cacheIssuesCaught: 0,
-  loopsDetected: 0,
-  resumeAnomaliesCaught: 0,
-  contextOverflowWarnings: 0,
-  editThrashingCaught: 0,
   totalTurnsMonitored: 0,
   healthySessionPct: 0,
   avgCacheRatio: 0,
-  compactionsSaved: 0,
+  detected: {
+    cacheIssues: 0,
+    loops: 0,
+    resumeAnomalies: 0,
+    contextOverflows: 0,
+  },
   countedSessions: [],
 }
 
@@ -63,7 +65,7 @@ export function updateImpactFromSessions(
   stats: ImpactStats,
   sessions: SessionState[]
 ): ImpactStats {
-  const updated = { ...stats }
+  const updated = { ...stats, detected: { ...stats.detected } }
   const counted = new Set(stats.countedSessions)
 
   for (const session of sessions) {
@@ -73,18 +75,17 @@ export function updateImpactFromSessions(
     updated.sessionsMonitored++
 
     if (session.cacheHealth.degradationDetected || session.cacheHealth.status === 'degraded') {
-      updated.cacheIssuesCaught++
+      updated.detected.cacheIssues++
     }
 
     if (session.loopState.loopDetected) {
-      updated.loopsDetected++
+      updated.detected.loops++
     }
 
     if (session.resumeAnomaly.detected) {
-      updated.resumeAnomaliesCaught++
+      updated.detected.resumeAnomalies++
     }
 
-    // Check for context overflow (>= 90% of limit)
     const lastTurn = session.turns[session.turns.length - 1]
     if (lastTurn) {
       const contextSize =
@@ -94,14 +95,12 @@ export function updateImpactFromSessions(
       const isOpus = session.model?.includes('opus') ?? false
       const limit = isOpus ? 1_000_000 : 200_000
       if (contextSize / limit >= 0.9) {
-        updated.contextOverflowWarnings++
+        updated.detected.contextOverflows++
       }
     }
-
   }
 
-  // Recompute aggregate KPIs from ALL sessions (not just new ones)
-  // These are recalculated fresh every time to stay accurate
+  // Recompute aggregate KPIs from ALL sessions
   let healthyCount = 0
   let totalRatio = 0
   let sessionsWithRatio = 0
@@ -133,8 +132,9 @@ export function updateImpactFromSessions(
 
 /**
  * Format impact stats for terminal display.
+ * Splits into "detected" (from scans) and "actions taken" (from activity log).
  */
-export function formatImpactStats(stats: ImpactStats): string {
+export async function formatImpactStats(stats: ImpactStats): Promise<string> {
   const lines: string[] = []
   const daysSince = Math.max(
     1,
@@ -150,44 +150,68 @@ export function formatImpactStats(stats: ImpactStats): string {
   lines.push(`  Total turns tracked: ${stats.totalTurnsMonitored.toLocaleString()}`)
   lines.push('')
 
-  // Session health — the headline KPIs
+  // Session health
   lines.push('  SESSION HEALTH')
   lines.push('  ──────────────')
   lines.push(`  Healthy sessions:     ${stats.healthySessionPct}%`)
   lines.push(`  Average cache ratio:  ${(stats.avgCacheRatio * 100).toFixed(1)}%`)
   lines.push('')
 
-  // Issues caught — what clauditor did
-  const totalIssues =
-    stats.cacheIssuesCaught +
-    stats.loopsDetected +
-    stats.resumeAnomaliesCaught +
-    stats.contextOverflowWarnings +
-    stats.editThrashingCaught
+  // Actions taken — from the activity log (real actions hooks performed)
+  const allActivity = await readActivity(1000)
+  const actions = {
+    cacheWarnings: allActivity.filter((e) => e.type === 'cache_warning').length,
+    loopsBlocked: allActivity.filter((e) => e.type === 'loop_blocked').length,
+    resumeWarnings: allActivity.filter((e) => e.type === 'resume_warning').length,
+    contextWarnings: allActivity.filter((e) => e.type === 'context_warning').length,
+    bashCompressions: allActivity.filter((e) => e.type === 'bash_compressed').length,
+    notifications: allActivity.filter((e) => e.type === 'notification').length,
+  }
+  const totalActions = Object.values(actions).reduce((a, b) => a + b, 0)
 
-  lines.push('  ISSUES CAUGHT')
-  lines.push('  ─────────────')
+  lines.push('  ACTIONS TAKEN (by hooks, in real-time)')
+  lines.push('  ──────────────────────────────────────')
 
-  if (totalIssues === 0) {
-    lines.push('  No issues detected — your sessions have been healthy.')
+  if (totalActions === 0) {
+    lines.push('  No actions yet — hooks will act when issues occur during your sessions.')
+    lines.push('  Use Claude Code normally. clauditor works in the background.')
   } else {
-    if (stats.cacheIssuesCaught > 0) {
-      lines.push(`  ${stats.cacheIssuesCaught} cache degradation${stats.cacheIssuesCaught === 1 ? '' : 's'}     — sessions reprocessing context from scratch`)
-    }
-    if (stats.loopsDetected > 0) {
-      lines.push(`  ${stats.loopsDetected} loop${stats.loopsDetected === 1 ? '' : 's'} blocked            — Claude retrying the same failing action`)
-    }
-    if (stats.resumeAnomaliesCaught > 0) {
-      lines.push(`  ${stats.resumeAnomaliesCaught} resume anomal${stats.resumeAnomaliesCaught === 1 ? 'y' : 'ies'}         — token explosion or cache break on resume`)
-    }
-    if (stats.contextOverflowWarnings > 0) {
-      lines.push(`  ${stats.contextOverflowWarnings} context save${stats.contextOverflowWarnings === 1 ? '' : 's'}          — saved progress before compaction`)
-    }
-    if (stats.editThrashingCaught > 0) {
-      lines.push(`  ${stats.editThrashingCaught} edit thrash${stats.editThrashingCaught === 1 ? '' : 'es'} redirected  — Claude stopped and asked to rethink approach`)
-    }
-    lines.push('')
-    lines.push(`  Total: ${totalIssues} issue${totalIssues === 1 ? '' : 's'} caught across ${stats.sessionsMonitored} sessions`)
+    if (actions.cacheWarnings > 0)
+      lines.push(`  ${actions.cacheWarnings} cache warning${actions.cacheWarnings === 1 ? '' : 's'} injected       — told Claude to suggest /clear`)
+    if (actions.loopsBlocked > 0)
+      lines.push(`  ${actions.loopsBlocked} loop${actions.loopsBlocked === 1 ? '' : 's'} blocked              — stopped Claude from repeating failures`)
+    if (actions.resumeWarnings > 0)
+      lines.push(`  ${actions.resumeWarnings} resume warning${actions.resumeWarnings === 1 ? '' : 's'} injected   — warned about resume bugs`)
+    if (actions.contextWarnings > 0)
+      lines.push(`  ${actions.contextWarnings} context save${actions.contextWarnings === 1 ? '' : 's'} triggered     — saved progress before compaction`)
+    if (actions.bashCompressions > 0)
+      lines.push(`  ${actions.bashCompressions} bash output${actions.bashCompressions === 1 ? '' : 's'} compressed   — reduced noisy tool output`)
+    if (actions.notifications > 0)
+      lines.push(`  ${actions.notifications} desktop notification${actions.notifications === 1 ? '' : 's'}     — alerted you to problems`)
+  }
+
+  // Issues detected — from historical session scan
+  const totalDetected =
+    stats.detected.cacheIssues +
+    stats.detected.loops +
+    stats.detected.resumeAnomalies +
+    stats.detected.contextOverflows
+
+  lines.push('')
+  lines.push('  ISSUES DETECTED (from session history)')
+  lines.push('  ──────────────────────────────────────')
+
+  if (totalDetected === 0) {
+    lines.push('  No issues found in session history — your sessions have been healthy.')
+  } else {
+    if (stats.detected.cacheIssues > 0)
+      lines.push(`  ${stats.detected.cacheIssues} session${stats.detected.cacheIssues === 1 ? '' : 's'} with cache degradation`)
+    if (stats.detected.loops > 0)
+      lines.push(`  ${stats.detected.loops} session${stats.detected.loops === 1 ? '' : 's'} with loop patterns`)
+    if (stats.detected.resumeAnomalies > 0)
+      lines.push(`  ${stats.detected.resumeAnomalies} session${stats.detected.resumeAnomalies === 1 ? '' : 's'} with resume anomalies`)
+    if (stats.detected.contextOverflows > 0)
+      lines.push(`  ${stats.detected.contextOverflows} session${stats.detected.contextOverflows === 1 ? '' : 's'} near context limit`)
   }
 
   return lines.join('\n')

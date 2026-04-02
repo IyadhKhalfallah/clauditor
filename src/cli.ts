@@ -465,7 +465,7 @@ program
       return
     }
 
-    console.log('\n' + formatImpactStats(stats))
+    console.log('\n' + await formatImpactStats(stats))
     console.log('')
   })
 
