@@ -81,9 +81,16 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   }
 
   // 4. Check session health (rate-limited to avoid overhead on every call)
-  const healthWarning = await checkSessionHealth(input.session_id)
-  if (healthWarning) {
-    parts.push(healthWarning)
+  const healthResult = await checkSessionHealth(input.session_id)
+  if (healthResult) {
+    // If it's a block decision, return immediately — stop Claude
+    if ('decision' in healthResult && healthResult.decision === 'block') {
+      return healthResult
+    }
+    // Otherwise it's additionalContext warnings
+    if ('additionalContext' in healthResult && healthResult.additionalContext) {
+      parts.push(healthResult.additionalContext)
+    }
   }
 
   if (parts.length === 0) return {}
@@ -95,7 +102,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
 const lastHealthCheck = new Map<string, number>()
 const HEALTH_CHECK_INTERVAL_MS = 30_000 // check every 30 seconds — fast enough to catch 20-min burnouts
 
-async function checkSessionHealth(sessionId: string): Promise<string | null> {
+async function checkSessionHealth(sessionId: string): Promise<HookDecision | null> {
   const now = Date.now()
   const lastCheck = lastHealthCheck.get(sessionId) ?? 0
   if (now - lastCheck < HEALTH_CHECK_INTERVAL_MS) return null
@@ -253,17 +260,19 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
       )
     }
 
-    // SESSION ROTATION — the most impactful feature.
-    // When tokens per turn are consistently high, the session is too big.
-    // A fresh session would use 10x less quota for the same work.
-    // This isn't a warning — Claude acts: saves context and tells user to start fresh.
-    const rotationPrompt = checkSessionRotation(sessionId, turns)
-    if (rotationPrompt) {
-      // This takes priority over other warnings — prepend it
-      warnings.unshift(rotationPrompt)
+    // SESSION ROTATION — check waste factor.
+    // If waste is 10x+, BLOCK the tool result. Claude must stop.
+    // This works during autonomous operation when UserPromptSubmit doesn't fire.
+    const rotationBlock = checkSessionRotationBlock(sessionId, turns)
+    if (rotationBlock) {
+      return rotationBlock
     }
 
-    return warnings.length > 0 ? warnings.join('\n\n') : null
+    if (warnings.length > 0) {
+      return { additionalContext: warnings.join('\n\n') }
+    }
+
+    return null
   } catch {
     return null
   }
@@ -373,15 +382,73 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
 }
 
 /**
- * Session rotation — the core value of clauditor.
+ * Session rotation via PostToolUse BLOCK.
  *
- * Data shows: a 454-turn session averages 219k tokens/turn = 99M total.
- * Five 90-turn sessions doing the same work would use ~20M total.
- * That's 5x less quota for identical output.
- *
- * When avg tokens/turn exceeds the threshold for enough turns,
- * Claude saves context to CLAUDE.md and tells user to start fresh.
- * Not a suggestion — an action.
+ * This fires during autonomous operation when UserPromptSubmit doesn't.
+ * Uses decision: "block" to stop Claude after a tool call.
+ * Same waste factor logic, but blocks the tool result.
+ */
+function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): HookDecision | null {
+  const config = getRotationConfig()
+  if (!config.enabled) return null
+  if (turns.length < 30) return null
+
+  // Check if already blocked
+  let blocked: Record<string, boolean> = {}
+  try {
+    blocked = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
+  } catch {}
+  // Use a separate key for PostToolUse blocks vs UserPromptSubmit blocks
+  const key = `post-${sessionId}`
+  if (blocked[key]) return null
+
+  // Calculate waste factor
+  const turnTokens = turns.map((t) =>
+    t.usage.input_tokens + t.usage.output_tokens +
+    t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+  )
+  const baseline = turnTokens.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
+  const current = turnTokens.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
+  const wasteFactor = baseline > 0 ? Math.round(current / baseline) : 1
+
+  if (wasteFactor < 10) return null
+
+  // Mark as blocked
+  blocked[key] = true
+  try {
+    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+    writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blocked))
+  } catch {}
+
+  // Write to CLAUDE.md
+  if (config.writeToClaudeMd) {
+    const transcriptPath = findTranscriptPathSync(sessionId)
+    if (transcriptPath) {
+      writeSessionState(sessionId, turns, Math.round(current / 1000), wasteFactor)
+    }
+  }
+
+  logActivity({
+    type: 'context_warning',
+    session: sessionId.slice(0, 8),
+    message: `BLOCKED tool result — ${wasteFactor}x waste (${Math.round(current / 1000)}k/turn vs ${Math.round(baseline / 1000)}k baseline)`,
+  }).catch(() => {})
+
+  return {
+    decision: 'block',
+    reason:
+      `clauditor: This session is using ${wasteFactor}x more quota per turn than when it started ` +
+      `(${Math.round(baseline / 1000)}k → ${Math.round(current / 1000)}k tokens/turn). ` +
+      `Progress has been saved to CLAUDE.md. ` +
+      `Tell the user to start a fresh session with \`claude\` to reduce quota usage ${wasteFactor}x. ` +
+      `Their context will load automatically from CLAUDE.md.`,
+  }
+}
+
+const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.json')
+
+/**
+ * Session rotation via additionalContext (legacy, kept for nudge file writes).
  */
 const ROTATION_NUDGE_FILE = resolve(homedir(), '.clauditor', 'rotation-nudge.json')
 const ROTATION_CONFIG_FILE = resolve(homedir(), '.clauditor', 'rotation-config.json')
