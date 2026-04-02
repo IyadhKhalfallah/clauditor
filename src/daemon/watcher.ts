@@ -43,7 +43,8 @@ export class SessionWatcher {
     this.watcher = watch(`${watchDir}/**/*.jsonl`, {
       persistent: true,
       ignoreInitial: true,
-      usePolling: false,
+      usePolling: true,
+      interval: this.pollInterval,
     })
 
     this.watcher.on('add', (filePath) => this.processFile(filePath))
