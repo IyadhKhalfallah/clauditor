@@ -91,13 +91,15 @@ async function checkSessionHealth(sessionId: string): Promise<string | null> {
       )
     }
 
-    // Check context window size
+    // Check context window size — detect limit from actual usage
     const lastTurn = turns[turns.length - 1]
     const contextSize =
       lastTurn.usage.input_tokens +
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
-    const pct = Math.round((contextSize / 200_000) * 100)
+    // If context > 200k, they're on extended context (Opus 1M)
+    const contextLimit = contextSize > 200_000 ? 1_000_000 : 200_000
+    const pct = Math.round((contextSize / contextLimit) * 100)
 
     if (pct >= 95) {
       warnings.push(

@@ -29,7 +29,11 @@ export function Dashboard({ session }: DashboardProps) {
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
     : 0
-  const contextPct = Math.round((contextSize / 200_000) * 100)
+  // Context window varies by model: Opus 4.6 supports up to 1M with extended context
+  const isOpus = session.model?.includes('opus') ?? false
+  const contextLimit = isOpus ? 1_000_000 : 200_000
+  const contextLimitLabel = isOpus ? '1M' : '200k'
+  const contextPct = Math.round((contextSize / contextLimit) * 100)
 
   return (
     <Box flexDirection="column">
@@ -59,7 +63,7 @@ export function Dashboard({ session }: DashboardProps) {
               {contextPct}%
             </Text>
             {' '}
-            <Text dimColor>({(contextSize / 1000).toFixed(0)}k / 200k tokens)</Text>
+            <Text dimColor>({(contextSize / 1000).toFixed(0)}k / {contextLimitLabel} tokens)</Text>
           </Text>
           <Text>
             Cache efficiency: <Text bold color={session.cacheHealth.lastCacheRatio >= 0.7 ? 'green' : session.cacheHealth.lastCacheRatio >= 0.4 ? 'yellow' : 'red'}>

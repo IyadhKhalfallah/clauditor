@@ -71,21 +71,28 @@ export function estimateQuotaBurnRate(
       turn.usage.output_tokens * 5.0
   }, 0)
 
-  const remainingBudget = Math.max(0, quotaBudget - totalSessionWeighted)
-  const estimatedMinutesRemaining = tokensPerMinute > 0
-    ? remainingBudget / tokensPerMinute
-    : null
+  // Only estimate remaining time if we haven't already blown past the budget.
+  // For subscription users, quota isn't a fixed token budget — showing "0min left"
+  // is misleading. Only show estimates when they're meaningful.
+  const remainingBudget = quotaBudget - totalSessionWeighted
+  const estimatedMinutesRemaining =
+    tokensPerMinute > 0 && remainingBudget > 0
+      ? remainingBudget / tokensPerMinute
+      : null
 
-  // Classify burn rate
-  // "critical" = will hit limit in <30 min at current rate
-  // "elevated" = will hit limit in <2 hours
+  // Classify burn rate by comparing to a "normal" baseline.
+  // Normal session: ~2-5k weighted tokens/min on Opus.
+  // Elevated: >15k/min (suggests cache issues or verbose output).
+  // Critical: >50k/min (almost certainly broken cache or token explosion).
   let burnRateStatus: QuotaBurnRate['burnRateStatus'] = 'normal'
-  if (estimatedMinutesRemaining !== null) {
-    if (estimatedMinutesRemaining < 30) {
-      burnRateStatus = 'critical'
-    } else if (estimatedMinutesRemaining < 120) {
-      burnRateStatus = 'elevated'
-    }
+  if (tokensPerMinute > 50_000) {
+    burnRateStatus = 'critical'
+  } else if (tokensPerMinute > 15_000) {
+    burnRateStatus = 'elevated'
+  } else if (estimatedMinutesRemaining !== null && estimatedMinutesRemaining < 30) {
+    burnRateStatus = 'critical'
+  } else if (estimatedMinutesRemaining !== null && estimatedMinutesRemaining < 120) {
+    burnRateStatus = 'elevated'
   }
 
   return {

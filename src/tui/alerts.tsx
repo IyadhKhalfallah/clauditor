@@ -70,9 +70,10 @@ function getAlerts(session: SessionState): Alert[] {
   // Quota burn rate — critical
   if (session.quotaBurnRate.burnRateStatus === 'critical') {
     const mins = session.quotaBurnRate.estimatedMinutesRemaining
+    const timeStr = mins !== null ? `~${mins}min remaining` : 'unusually high burn rate'
     alerts.push({
       level: 'red',
-      title: `Quota draining fast — ~${mins}min remaining at current rate`,
+      title: `Quota draining fast — ${timeStr}`,
       detail:
         `Burning ${(session.quotaBurnRate.tokensPerMinute / 1000).toFixed(0)}k weighted tokens/min. ` +
         'At this rate you\'ll hit your session limit very soon.',
@@ -130,14 +131,16 @@ function getAlerts(session: SessionState): Alert[] {
     })
   }
 
-  // Context window
+  // Context window — model-aware limits
   const lastTurn = session.turns[session.turns.length - 1]
   if (lastTurn) {
     const contextSize =
       lastTurn.usage.input_tokens +
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
-    const pct = Math.round((contextSize / 200_000) * 100)
+    const isOpus = session.model?.includes('opus') ?? false
+    const contextLimit = isOpus ? 1_000_000 : 200_000
+    const pct = Math.round((contextSize / contextLimit) * 100)
 
     if (pct >= 100) {
       alerts.push({
