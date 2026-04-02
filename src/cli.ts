@@ -1,15 +1,22 @@
 import { Command } from 'commander'
 import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { cosmiconfig } from 'cosmiconfig'
 import { DEFAULT_CONFIG } from './types.js'
 import type { ClauditorConfig } from './types.js'
+
+// Read version from package.json so it stays in sync with releases
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'))
 
 const program = new Command()
 
 program
   .name('clauditor')
   .description('Real-time session health monitoring for Claude Code')
-  .version('0.1.0')
+  .version(pkg.version)
 
 // ─── clauditor watch ──────────────────────────────────────────────
 
