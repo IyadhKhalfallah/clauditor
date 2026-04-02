@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.11.0...v1.11.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* use exit code 2 for PostToolUse block — stronger than decision block ([5381a85](https://github.com/IyadhKhalfallah/clauditor/commit/5381a855e174d6dfec083e4c941caffd20462a46))
+
 ## [1.11.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.10.0...v1.11.0) (2026-04-02)
 
 
