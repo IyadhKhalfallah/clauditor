@@ -11,6 +11,7 @@ import { detectResumeAnomaly } from '../features/resume-detector.js'
 import { estimateQuotaBurnRate } from '../features/quota-burn.js'
 import { logActivity } from '../features/activity-log.js'
 import { saveSessionState, extractSessionStateFromTranscript, findTranscriptPathSync as findTranscriptSync } from '../features/session-state.js'
+import { readConfig } from '../config.js'
 
 /**
  * PostToolUse hook handler.
@@ -404,8 +405,8 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
  * Same waste factor logic, but blocks the tool result.
  */
 function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): HookDecision | null {
-  const config = getRotationConfig()
-  if (!config.enabled) return null
+  const config = readConfig()
+  if (!config.rotation.enabled) return null
   if (turns.length < 30) return null
 
   // Check if already blocked
@@ -464,22 +465,11 @@ const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.js
  * Session rotation via additionalContext (legacy, kept for nudge file writes).
  */
 const ROTATION_NUDGE_FILE = resolve(homedir(), '.clauditor', 'rotation-nudge.json')
-const ROTATION_CONFIG_FILE = resolve(homedir(), '.clauditor', 'rotation-config.json')
-
-function getRotationConfig(): { enabled: boolean; writeToClaudeMd: boolean; threshold: number; minTurns: number } {
-  const defaults = { enabled: true, writeToClaudeMd: true, threshold: 100_000, minTurns: 30 }
-  try {
-    const raw = JSON.parse(readFileSync(ROTATION_CONFIG_FILE, 'utf-8'))
-    return { ...defaults, ...raw }
-  } catch {
-    return defaults
-  }
-}
 
 function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string | null {
-  const config = getRotationConfig()
-  if (!config.enabled) return null
-  if (turns.length < config.minTurns) return null
+  const config = readConfig()
+  if (!config.rotation.enabled) return null
+  if (turns.length < config.rotation.minTurns) return null
 
   // Check if already nudged this session
   let nudged: Record<string, boolean> = {}
@@ -495,7 +485,7 @@ function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string |
       t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
   }, 0) / recentTurns.length
 
-  if (avgTokens < config.threshold) return null
+  if (avgTokens < config.rotation.threshold) return null
 
   // Mark as nudged
   nudged[sessionId] = true

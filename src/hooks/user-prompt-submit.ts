@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { saveSessionState as saveSState } from '../features/session-state.js'
+import { readConfig } from '../config.js'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { logActivity } from '../features/activity-log.js'
@@ -25,7 +26,6 @@ interface UserPromptSubmitInput {
 const WASTE_THRESHOLD = 10  // 10x waste factor triggers block
 const MIN_TURNS = 30        // don't block early sessions
 const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.json')
-const ROTATION_CONFIG_FILE = resolve(homedir(), '.clauditor', 'rotation-config.json')
 
 export async function handleUserPromptSubmitHook(): Promise<void> {
   const input = await readStdin()
@@ -39,8 +39,8 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
   }
 
   // Check config
-  const config = getRotationConfig()
-  if (!config.enabled) {
+  const config = readConfig()
+  if (!config.rotation.enabled) {
     process.stdout.write('{}')
     return
   }
@@ -197,14 +197,6 @@ function analyzeSession(transcriptPath: string): SessionAnalysis | null {
 }
 
 
-function getRotationConfig(): { enabled: boolean; writeToClaudeMd: boolean } {
-  try {
-    const raw = JSON.parse(readFileSync(ROTATION_CONFIG_FILE, 'utf-8'))
-    return { enabled: raw.enabled ?? true, writeToClaudeMd: raw.writeToClaudeMd ?? true }
-  } catch {
-    return { enabled: true, writeToClaudeMd: true }
-  }
-}
 
 function findTranscriptPathSync(sessionId: string): string | null {
   const projectsDir = resolve(homedir(), '.claude/projects')

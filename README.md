@@ -180,34 +180,29 @@ Sessions from last 7 days (70 total):
 
 ## Configuration
 
-Session rotation is on by default. Configure at `~/.clauditor/rotation-config.json`:
+Everything works out of the box. One config file at `~/.clauditor/config.json`:
 
 ```json
 {
-  "enabled": true,
-  "writeToClaudeMd": false,
-  "threshold": 100000,
-  "minTurns": 30
+  "rotation": {
+    "enabled": true,
+    "threshold": 100000,
+    "minTurns": 30
+  },
+  "notifications": {
+    "desktop": true
+  }
 }
 ```
 
 | Setting | Default | Description |
 |---|---|---|
-| `enabled` | `true` | Enable/disable session rotation |
-| `writeToClaudeMd` | `false` | Write session state to CLAUDE.md (off by default — uses ~/.clauditor/ instead) |
-| `threshold` | `100000` | Tokens/turn average to trigger rotation |
-| `minTurns` | `30` | Minimum turns before rotation can trigger |
+| `rotation.enabled` | `true` | Enable/disable session rotation |
+| `rotation.threshold` | `100000` | Tokens/turn average to trigger block |
+| `rotation.minTurns` | `30` | Minimum turns before blocking |
+| `notifications.desktop` | `true` | Desktop notifications for cache issues |
 
-Additional config via `.clauditorrc` or `clauditor.config.js` ([cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)):
-
-```json
-{
-  "watch": {
-    "projectsDir": "~/.claude/projects",
-    "pollInterval": 1000
-  }
-}
-```
+Created automatically on `clauditor install`. Edit to customize.
 
 ## How it saves context
 
