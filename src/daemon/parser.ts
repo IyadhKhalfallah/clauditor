@@ -214,6 +214,7 @@ export interface SessionContext {
   cwd: string | null
   gitBranch: string | null
   projectName: string | null
+  firstUserMessage: string | null
 }
 
 /**
@@ -239,7 +240,31 @@ export function extractSessionContext(records: SessionRecord[]): SessionContext 
   // Works on both Unix (/) and Windows (\) paths
   const projectName = cwd ? cwd.split(/[/\\]/).filter(Boolean).pop() ?? null : null
 
-  return { cwd, gitBranch, projectName }
+  // Extract first user message — useful for subagent labeling
+  let firstUserMessage: string | null = null
+  for (const record of records) {
+    if (record.type === 'user') {
+      const user = record as UserRecord
+      const content = user.message?.content
+      if (typeof content === 'string' && content.trim()) {
+        firstUserMessage = content.trim()
+        break
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block && typeof block === 'object' && 'type' in block) {
+            const b = block as Record<string, unknown>
+            if (b.type === 'text' && typeof b.text === 'string') {
+              firstUserMessage = (b.text as string).trim()
+              break
+            }
+          }
+        }
+        if (firstUserMessage) break
+      }
+    }
+  }
+
+  return { cwd, gitBranch, projectName, firstUserMessage }
 }
 
 function normalizeUsage(usage: Partial<TokenUsage>): TokenUsage {

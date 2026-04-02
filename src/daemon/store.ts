@@ -32,7 +32,7 @@ export class SessionStore {
     projectPath: string,
     turns: TurnMetrics[],
     model: string | null = null,
-    context: { cwd: string | null; gitBranch: string | null; projectName: string | null } = { cwd: null, gitBranch: null, projectName: null },
+    context: { cwd: string | null; gitBranch: string | null; projectName: string | null; firstUserMessage: string | null } = { cwd: null, gitBranch: null, projectName: null, firstUserMessage: null },
     isResumed: boolean = false
   ): SessionState {
     const totalUsage = this.aggregateUsage(turns)
@@ -51,9 +51,16 @@ export class SessionStore {
     const isSubagent = sessionId.startsWith('agent-')
     const name = context.projectName || projectPath
     const branch = context.gitBranch ? ` (${context.gitBranch})` : ''
-    const label = isSubagent
-      ? `↳ subagent ${sessionId.slice(6, 8)}`
-      : `${name}${branch}`
+    let label: string
+    if (isSubagent && context.firstUserMessage) {
+      // Truncate subagent task to first ~40 chars for readability
+      const task = context.firstUserMessage.slice(0, 40).replace(/\n/g, ' ')
+      label = `↳ ${task}${context.firstUserMessage.length > 40 ? '…' : ''}`
+    } else if (isSubagent) {
+      label = `↳ subagent ${sessionId.slice(6, 8)}`
+    } else {
+      label = `${name}${branch}`
+    }
 
     const state: SessionState = {
       sessionId,
