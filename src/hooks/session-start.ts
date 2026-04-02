@@ -51,15 +51,25 @@ async function buildSessionStartContext(
       )
     }
 
-    // Remind Claude about CLAUDE.md context (addresses compaction amnesia)
+    // Inject last session state if available
+    const { readLastSessionState } = await import('../features/session-state.js')
+    const lastState = readLastSessionState()
+    if (lastState) {
+      parts.push(
+        `[clauditor — previous session context]:\n` +
+        `The previous session was rotated because it was too large. Here's what was saved:\n\n` +
+        lastState + `\n` +
+        `Use this context to pick up where the user left off.`
+      )
+    }
+
+    // Remind Claude about CLAUDE.md context
     if (cwd) {
       const claudeMdPath = resolve(cwd, 'CLAUDE.md')
       try {
         await stat(claudeMdPath)
         parts.push(
-          `[clauditor]: CLAUDE.md exists in this project. It may contain context saved from a previous session ` +
-          `(architectural decisions, task status, conventions). Read it carefully — it's there to prevent ` +
-          `re-explaining things that were already decided.`
+          `[clauditor]: CLAUDE.md exists in this project. Read it for project conventions and context.`
         )
       } catch {
         // No CLAUDE.md — that's fine

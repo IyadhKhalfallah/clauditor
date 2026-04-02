@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
+import { saveSessionState as saveSState } from '../features/session-state.js'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { logActivity } from '../features/activity-log.js'
@@ -85,10 +86,16 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
       writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blocked))
     } catch {}
 
-    // Write session state to CLAUDE.md
-    if (config.writeToClaudeMd && analysis.cwd) {
-      writeSessionState(analysis)
-    }
+    // Save session state to ~/.clauditor/last-session.md
+    saveSState({
+      savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      branch: analysis.branch,
+      turns: analysis.turns,
+      tokensPerTurn: Math.round(analysis.current / 1000),
+      wasteFactor,
+      filesModified: analysis.filesModified,
+      cwd: analysis.cwd,
+    })
 
     logActivity({
       type: 'context_warning',
@@ -110,11 +117,11 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
         `Your turns started at ${Math.round(analysis.baseline / 1000)}k tokens.\n` +
         `They're now at ${Math.round(analysis.current / 1000)}k tokens.\n` +
         `Each turn uses ${wasteFactor}x more quota than when this session started.\n\n` +
-        `Progress saved to CLAUDE.md:\n` +
+        `Session state saved.\n` +
         `  Branch: ${analysis.branch || 'unknown'}\n` +
         `  Files: ${filesList}\n` +
         `  Turns: ${analysis.turns}\n\n` +
-        `Start fresh: run \`claude\` — your context loads from CLAUDE.md automatically.\n` +
+        `Start fresh: run \`claude\` — clauditor will inject your previous session context.\n` +
         `Or press Enter to continue in this session (not recommended).`,
     }))
   } catch {
@@ -189,47 +196,6 @@ function analyzeSession(transcriptPath: string): SessionAnalysis | null {
   }
 }
 
-function writeSessionState(analysis: SessionAnalysis): void {
-  if (!analysis.cwd) return
-
-  try {
-    const claudeMdPath = resolve(analysis.cwd, 'CLAUDE.md')
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
-    const filesList = analysis.filesModified.length > 0
-      ? analysis.filesModified.slice(0, 15).join(', ')
-      : 'none tracked'
-    const wasteFactor = analysis.baseline > 0
-      ? Math.round(analysis.current / analysis.baseline)
-      : 0
-
-    const stateBlock = [
-      '',
-      '## Session State (auto-saved by clauditor)',
-      `- **Saved at:** ${now}`,
-      `- **Branch:** ${analysis.branch || 'unknown'}`,
-      `- **Session size:** ${analysis.turns} turns, ${Math.round(analysis.current / 1000)}k tokens/turn`,
-      `- **Waste factor:** ${wasteFactor}x (started at ${Math.round(analysis.baseline / 1000)}k/turn)`,
-      `- **Files modified:** ${filesList}`,
-      `- **Action:** Start a fresh session with \`claude\` — this context will load automatically`,
-      '',
-    ].join('\n')
-
-    let existing = ''
-    try {
-      existing = readFileSync(claudeMdPath, 'utf-8')
-    } catch {}
-
-    if (existing.includes('Session State (auto-saved by clauditor')) {
-      existing = existing.replace(
-        /\n## Session State \(auto-saved by clauditor[^)]*\)[\s\S]*?(?=\n## |\n$|$)/,
-        stateBlock
-      )
-      writeFileSync(claudeMdPath, existing)
-    } else {
-      appendFileSync(claudeMdPath, stateBlock)
-    }
-  } catch {}
-}
 
 function getRotationConfig(): { enabled: boolean; writeToClaudeMd: boolean } {
   try {
