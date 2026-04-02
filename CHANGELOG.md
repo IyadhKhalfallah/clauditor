@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.0.0...v1.0.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* read version from package.json instead of hardcoding ([0ee518c](https://github.com/IyadhKhalfallah/clauditor/commit/0ee518ca44c346222c30c1da54a445c486d9ac1d))
+
 ## 1.0.0 (2026-04-02)
 
 
