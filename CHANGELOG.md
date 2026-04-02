@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.4.1...v1.5.0) (2026-04-02)
+
+
+### Features
+
+* auto-nudge /save-skill after productive sessions ([7c02bde](https://github.com/IyadhKhalfallah/clauditor/commit/7c02bdefecffc970415bbef1dd5688d80ddaaa20))
+* clauditor sessions — see where your tokens went ([b7516a3](https://github.com/IyadhKhalfallah/clauditor/commit/b7516a3f907561888f5f017026bdaf26da34a4b1))
+* install /save-skill — users say "save what we did" and Claude writes the skill ([0a5a300](https://github.com/IyadhKhalfallah/clauditor/commit/0a5a30019dffba0bf0af82759601a289f3bb6e18))
+* token spike detector — catches "limit hit in 20 min" in real-time ([efd268f](https://github.com/IyadhKhalfallah/clauditor/commit/efd268f39dd4ecc41611e0e78a21540108a9760f))
+
+
+### Bug Fixes
+
+* 68% cache at turn 58 showed 'warming up' instead of degraded ([09c6ca2](https://github.com/IyadhKhalfallah/clauditor/commit/09c6ca2a0d873249c551e55c67e80fff35616c5b))
+* detect cache drops (98% → 68%) not just full degradation ([8c94091](https://github.com/IyadhKhalfallah/clauditor/commit/8c94091eb27328beea4d8b550a80c08ef8a1ebe3))
+* don't recommend /clear for temporary cache dips ([f4dd1b2](https://github.com/IyadhKhalfallah/clauditor/commit/f4dd1b280d5a1af8a40fb6aab21eb4197e17b1b1))
+
 ## [1.4.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.4.0...v1.4.1) (2026-04-02)
 
 
