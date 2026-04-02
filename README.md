@@ -2,7 +2,7 @@
 
 > Session health monitoring for Claude Code — keep your sessions fast and your context intact.
 
-clauditor watches your Claude Code sessions in real time. It detects when cache breaks (making responses slow), when Claude gets stuck in loops, and when your context window is about to overflow — then tells you exactly what to do about it.
+clauditor watches your Claude Code sessions in real time. It detects when cache breaks (making responses slow), when Claude gets stuck in loops, when your context window is about to overflow, and when session resume drains your quota — then tells you exactly what to do about it.
 
 It reads Claude Code's local JSONL session files and integrates with the official [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks).
 
