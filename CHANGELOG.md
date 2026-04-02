@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.3...v1.2.0) (2026-04-02)
+
+
+### Features
+
+* add SessionStart hook, repeated-edit detector, and richer KPIs ([f745248](https://github.com/IyadhKhalfallah/clauditor/commit/f745248e335fbbb886c377fd1b06fd7431ca3836))
+* auto-save session context to CLAUDE.md before compaction ([0d62984](https://github.com/IyadhKhalfallah/clauditor/commit/0d62984c05728be191fb3cd4b0eed5a23ba42dfe))
+* richer impact KPIs — all provable from JSONL data ([6bb52bf](https://github.com/IyadhKhalfallah/clauditor/commit/6bb52bff8639adcb430d38de5091e019b4ce6e1c))
+* show subagent task description instead of cryptic IDs ([dd2e8e5](https://github.com/IyadhKhalfallah/clauditor/commit/dd2e8e5be9412e1db132f83c006264abaa6724b3))
+
+
+### Bug Fixes
+
+* include subagent ID in parentheses before task description ([2f8f2d5](https://github.com/IyadhKhalfallah/clauditor/commit/2f8f2d599946f1aefef99c17a889863353b8047a))
+
 ## [1.1.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.2...v1.1.3) (2026-04-02)
 
 
