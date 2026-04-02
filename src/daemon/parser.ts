@@ -92,6 +92,7 @@ export function extractTurns(records: SessionRecord[]): TurnMetrics[] {
         name: block.name || 'unknown',
         inputHash: hashValue(block.input),
         outputHash: '', // filled in when tool_result is matched
+        inputLabel: extractInputLabel(block.name || '', block.input),
       }))
 
     turns.push({
@@ -265,6 +266,30 @@ export function extractSessionContext(records: SessionRecord[]): SessionContext 
   }
 
   return { cwd, gitBranch, projectName, firstUserMessage }
+}
+
+/**
+ * Extract a short readable label from a tool call input.
+ */
+function extractInputLabel(toolName: string, input: unknown): string {
+  if (!input || typeof input !== 'object') return ''
+  const obj = input as Record<string, unknown>
+
+  switch (toolName) {
+    case 'Bash': {
+      const cmd = typeof obj.command === 'string' ? obj.command : ''
+      // Take first line, truncate to 60 chars
+      return cmd.split('\n')[0].trim().slice(0, 60)
+    }
+    case 'Read':
+    case 'Edit':
+    case 'Write': {
+      const fp = typeof obj.file_path === 'string' ? obj.file_path : ''
+      return fp.split(/[/\\]/).pop() || ''
+    }
+    default:
+      return ''
+  }
 }
 
 function normalizeUsage(usage: Partial<TokenUsage>): TokenUsage {

@@ -106,6 +106,8 @@ export interface ToolCallSummary {
   name: string
   inputHash: string
   outputHash: string
+  /** Short readable label — e.g. "npm test" for Bash commands */
+  inputLabel?: string
 }
 
 export interface CacheHealth {

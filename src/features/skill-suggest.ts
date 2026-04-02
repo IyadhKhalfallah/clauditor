@@ -34,12 +34,25 @@ const MAX_SEQUENCE_LENGTH = 8
  * Extracts Bash command sequences and Edit/Write file patterns,
  * normalizes them, and finds sequences that appear in 3+ sessions.
  */
+// Map from hash-based key to human-readable label
+const hashLabels = new Map<string, string>()
+
 export function detectWorkflowPatterns(sessions: SessionState[]): WorkflowPattern[] {
   // Extract normalized tool sequences from each session
   const sessionSequences = new Map<string, { sequences: string[][]; label: string }>()
 
   for (const session of sessions) {
     if (session.turns.length < 3) continue
+
+    // Collect hash→label mappings from this session
+    for (const turn of session.turns) {
+      for (const call of turn.toolCalls) {
+        if (call.name === 'Bash' && call.inputLabel) {
+          hashLabels.set(call.inputHash.slice(0, 8), call.inputLabel)
+        }
+      }
+    }
+
     const steps = extractNormalizedSteps(session.turns)
     if (steps.length < MIN_SEQUENCE_LENGTH) continue
     sessionSequences.set(session.filePath, { sequences: extractSubsequences(steps), label: session.label })
@@ -158,28 +171,15 @@ function extractNormalizedSteps(turns: TurnMetrics[]): string[] {
 
 /**
  * Normalize a tool call to a comparable string.
- * Strips session-specific details, keeps the command structure.
+ *
+ * ONLY tracks Bash commands — Read/Edit/Grep/Glob are too generic
+ * ("Read file, Read file" is not a workflow, it's just using Claude Code).
+ * Bash commands have distinct, meaningful inputs: npm test, git push, etc.
  */
 function normalizeToolCall(call: ToolCallSummary): string | null {
-  const { name } = call
-
-  // We only track tools that form meaningful workflow patterns
-  switch (name) {
-    case 'Bash':
-      // Use the inputHash as a proxy — same hash = same command
-      return `Bash:${call.inputHash.slice(0, 8)}`
-    case 'Edit':
-    case 'Write':
-      return `${name}:file`
-    case 'Read':
-      return `Read:file`
-    case 'Grep':
-      return `Grep:search`
-    case 'Glob':
-      return `Glob:find`
-    default:
-      return null // Skip Agent, TodoWrite, etc.
-  }
+  if (call.name !== 'Bash') return null
+  // Use the inputHash as a proxy — same hash = same command
+  return `Bash:${call.inputHash.slice(0, 8)}`
 }
 
 /**
@@ -200,10 +200,11 @@ function extractSubsequences(steps: string[]): string[][] {
 function parseStep(stepStr: string): WorkflowStep {
   const colonIdx = stepStr.indexOf(':')
   if (colonIdx === -1) return { tool: stepStr, input: '' }
-  return {
-    tool: stepStr.slice(0, colonIdx),
-    input: stepStr.slice(colonIdx + 1),
-  }
+  const tool = stepStr.slice(0, colonIdx)
+  const hash = stepStr.slice(colonIdx + 1)
+  // Resolve hash to human-readable label
+  const label = hashLabels.get(hash) || hash
+  return { tool, input: label }
 }
 
 /**
@@ -229,21 +230,25 @@ function deduplicatePatterns(patterns: WorkflowPattern[]): WorkflowPattern[] {
  * Generate a kebab-case skill name from a workflow pattern.
  */
 function generateSkillName(pattern: WorkflowPattern): string {
-  const tools = pattern.steps.map((s) => s.tool.toLowerCase())
-  const unique = [...new Set(tools)]
-
-  // Try to name it by the dominant tool combination
-  if (unique.length === 1 && unique[0] === 'bash') {
-    return 'run-workflow'
+  // Extract the first meaningful command word from each step
+  const keywords: string[] = []
+  for (const step of pattern.steps) {
+    if (step.tool === 'Bash' && step.input) {
+      // Extract the base command: "npm test" → "test", "git push" → "push"
+      const parts = step.input.trim().split(/\s+/)
+      if (parts[0] === 'npm' || parts[0] === 'npx' || parts[0] === 'yarn' || parts[0] === 'pnpm') {
+        keywords.push(parts[1] || parts[0])
+      } else if (parts[0] === 'git') {
+        keywords.push(parts[1] || 'git')
+      } else {
+        keywords.push(parts[0])
+      }
+    }
   }
 
-  if (unique.includes('bash') && (unique.includes('edit') || unique.includes('write'))) {
-    return 'test-fix-verify'
-  }
+  if (keywords.length === 0) return 'workflow'
 
-  if (unique.includes('grep') || unique.includes('read')) {
-    return 'search-and-review'
-  }
-
-  return `workflow-${unique.slice(0, 3).join('-')}`
+  // Deduplicate and join
+  const unique = [...new Set(keywords)].slice(0, 3)
+  return unique.join('-').replace(/[^a-z0-9-]/gi, '').toLowerCase() || 'workflow'
 }
