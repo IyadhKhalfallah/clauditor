@@ -34,6 +34,9 @@ program
 
     const projectPath = options.project ? resolve(options.project) : undefined
 
+    // Clear terminal before rendering to prevent stacked frames
+    process.stdout.write('\x1B[2J\x1B[H')
+
     const { store } = await startDaemon({
       projectsDir: config.watch.projectsDir,
       projectPath,
