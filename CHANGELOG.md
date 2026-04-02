@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.2.0...v1.2.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* compute totalTurnsMonitored from all sessions, not just new ones ([a73dd11](https://github.com/IyadhKhalfallah/clauditor/commit/a73dd11feec02883c95904866ec0872daca16303))
+
 ## [1.2.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.1.3...v1.2.0) (2026-04-02)
 
 
