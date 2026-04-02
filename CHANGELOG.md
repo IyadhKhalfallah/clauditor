@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.6.0...v1.7.0) (2026-04-02)
+
+
+### Features
+
+* show tokens/turn and rotation status in dashboard ([2a3c158](https://github.com/IyadhKhalfallah/clauditor/commit/2a3c1586973743550ca7c8673efc17ece94feb94))
+
 ## [1.6.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.5.0...v1.6.0) (2026-04-02)
 
 
