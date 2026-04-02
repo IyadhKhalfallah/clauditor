@@ -1,10 +1,11 @@
 import { watch, type FSWatcher } from 'chokidar'
 import { resolve, basename, sep } from 'node:path'
 import { homedir } from 'node:os'
-import { readdir, stat } from 'node:fs/promises'
-import { parseJsonlFile, extractTurns, extractModel, extractSessionContext } from './parser.js'
+import { readdir, stat, open } from 'node:fs/promises'
+import { parseJsonlLine, parseJsonlFile, extractTurns, extractModel, extractSessionContext } from './parser.js'
 import { hasResumeBoundary } from '../features/resume-detector.js'
 import { SessionStore } from './store.js'
+import type { SessionRecord } from '../types.js'
 
 export interface WatcherOptions {
   projectsDir?: string
@@ -18,6 +19,11 @@ export class SessionWatcher {
   private projectsDir: string
   private projectPath: string | null
   private pollInterval: number
+
+  // Track file offsets for incremental reading
+  private fileOffsets = new Map<string, number>()
+  // Cache parsed records per file so we only parse new lines
+  private fileRecords = new Map<string, SessionRecord[]>()
 
   constructor(store: SessionStore, options: WatcherOptions = {}) {
     this.store = store
@@ -34,10 +40,6 @@ export class SessionWatcher {
       ? resolve(this.projectsDir, encodeProjectPath(this.projectPath))
       : this.projectsDir
 
-    // Watch for new/changed files going forward.
-    // ignoreInitial: true since we already scanned above.
-    // No awaitWriteFinish — it causes chokidar to delay or skip
-    // events for already-stable files.
     this.watcher = watch(`${watchDir}/**/*.jsonl`, {
       persistent: true,
       ignoreInitial: true,
@@ -45,7 +47,7 @@ export class SessionWatcher {
     })
 
     this.watcher.on('add', (filePath) => this.processFile(filePath))
-    this.watcher.on('change', (filePath) => this.processFile(filePath))
+    this.watcher.on('change', (filePath) => this.processFileIncremental(filePath))
   }
 
   async stop(): Promise<void> {
@@ -59,9 +61,6 @@ export class SessionWatcher {
     return this.store
   }
 
-  /**
-   * Scan and process all existing JSONL files (for stats command).
-   */
   async scanAll(): Promise<void> {
     const dir = this.projectPath
       ? resolve(this.projectsDir, encodeProjectPath(this.projectPath))
@@ -90,30 +89,91 @@ export class SessionWatcher {
     }
   }
 
+  /**
+   * Full parse — used for initial scan and new files.
+   */
   private async processFile(filePath: string): Promise<void> {
     try {
-      const sessionId = extractSessionId(filePath)
-      const projectPath = extractProjectPath(filePath, this.projectsDir)
-
       const records = await parseJsonlFile(filePath)
-      const turns = extractTurns(records)
-      const model = extractModel(records)
-      const context = extractSessionContext(records)
-      const isResumed = hasResumeBoundary(records)
 
-      if (turns.length > 0) {
-        this.store.update(sessionId, filePath, projectPath, turns, model, context, isResumed)
-      }
+      // Cache records and track file size for incremental reads
+      this.fileRecords.set(filePath, records)
+      try {
+        const fileStat = await stat(filePath)
+        this.fileOffsets.set(filePath, fileStat.size)
+      } catch {}
+
+      this.updateStore(filePath, records)
     } catch {
       // Ignore corrupt or in-progress files
     }
   }
+
+  /**
+   * Incremental parse — only read new bytes appended since last read.
+   * Falls back to full parse if incremental read fails.
+   */
+  private async processFileIncremental(filePath: string): Promise<void> {
+    const lastOffset = this.fileOffsets.get(filePath)
+
+    if (lastOffset === undefined) {
+      // Never seen this file — do a full parse
+      return this.processFile(filePath)
+    }
+
+    try {
+      const fileStat = await stat(filePath)
+
+      if (fileStat.size <= lastOffset) {
+        // File was truncated or unchanged — full re-parse
+        return this.processFile(filePath)
+      }
+
+      // Read only the new bytes
+      const fh = await open(filePath, 'r')
+      try {
+        const newBytes = Buffer.alloc(fileStat.size - lastOffset)
+        await fh.read(newBytes, 0, newBytes.length, lastOffset)
+
+        const newContent = newBytes.toString('utf-8')
+        const newLines = newContent.split('\n')
+        const newRecords: SessionRecord[] = []
+
+        for (const line of newLines) {
+          const record = parseJsonlLine(line)
+          if (record) newRecords.push(record)
+        }
+
+        // Append new records to cache
+        const existingRecords = this.fileRecords.get(filePath) || []
+        const allRecords = [...existingRecords, ...newRecords]
+        this.fileRecords.set(filePath, allRecords)
+        this.fileOffsets.set(filePath, fileStat.size)
+
+        this.updateStore(filePath, allRecords)
+      } finally {
+        await fh.close()
+      }
+    } catch {
+      // Incremental failed — fall back to full parse
+      return this.processFile(filePath)
+    }
+  }
+
+  private updateStore(filePath: string, records: SessionRecord[]): void {
+    const sessionId = extractSessionId(filePath)
+    const projectPath = extractProjectPath(filePath, this.projectsDir)
+    const turns = extractTurns(records)
+    const model = extractModel(records)
+    const context = extractSessionContext(records)
+    const isResumed = hasResumeBoundary(records)
+
+    if (turns.length > 0) {
+      this.store.update(sessionId, filePath, projectPath, turns, model, context, isResumed)
+    }
+  }
 }
 
-/**
- * Encode a project path the same way Claude Code does:
- * replace every non-alphanumeric character with '-'
- */
 export function encodeProjectPath(projectPath: string): string {
   return projectPath.replace(/[^a-zA-Z0-9]/g, '-')
 }
@@ -126,9 +186,8 @@ function extractSessionId(filePath: string): string {
 function extractProjectPath(filePath: string, projectsDir: string): string {
   const relative = filePath
     .replace(projectsDir + sep, '')
-    .replace(projectsDir + '/', '') // handle both separators
+    .replace(projectsDir + '/', '')
   const parts = relative.split(sep)
-  // First segment is the encoded project path
   return parts[0] || 'unknown'
 }
 
