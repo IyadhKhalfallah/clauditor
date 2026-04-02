@@ -53,11 +53,11 @@ export class SessionStore {
     const branch = context.gitBranch ? ` (${context.gitBranch})` : ''
     let label: string
     if (isSubagent && context.firstUserMessage) {
-      // Truncate subagent task to first ~40 chars for readability
-      const task = context.firstUserMessage.slice(0, 40).replace(/\n/g, ' ')
-      label = `↳ ${task}${context.firstUserMessage.length > 40 ? '…' : ''}`
+      const shortId = sessionId.slice(6, 8)
+      const task = context.firstUserMessage.slice(0, 35).replace(/\n/g, ' ')
+      label = `↳ (${shortId}) ${task}${context.firstUserMessage.length > 35 ? '…' : ''}`
     } else if (isSubagent) {
-      label = `↳ subagent ${sessionId.slice(6, 8)}`
+      label = `↳ (${sessionId.slice(6, 8)}) subagent`
     } else {
       label = `${name}${branch}`
     }
