@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.3...v1.8.0) (2026-04-02)
+
+
+### Features
+
+* configurable session rotation with CLAUDE.md write opt-out ([b35cbf5](https://github.com/IyadhKhalfallah/clauditor/commit/b35cbf523666c34feecae0ccffe0139d979ee154))
+
+
+### Bug Fixes
+
+* remove debug logging from session state writer ([eed24d6](https://github.com/IyadhKhalfallah/clauditor/commit/eed24d6d340c7561027fe5eae2a9c478090aca9f))
+
 ## [1.7.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.7.2...v1.7.3) (2026-04-02)
 
 
