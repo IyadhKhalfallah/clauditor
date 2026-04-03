@@ -13,6 +13,16 @@ export interface SessionStateData {
   wasteFactor: number
   filesModified: string[]
   cwd: string | null
+  /** The user's original task/prompt */
+  originalTask: string | null
+  /** Last 3 user messages (often contain key decisions) */
+  recentUserMessages: string[]
+  /** Git commits made during the session */
+  gitCommits: string[]
+  /** Key bash commands and outcomes (tests, builds, deploys) */
+  keyCommands: string[]
+  /** Files read during the session */
+  filesRead: string[]
 }
 
 /**
@@ -28,7 +38,7 @@ export function saveSessionState(data: SessionStateData): void {
       ? data.filesModified.slice(0, 15).join(', ')
       : 'none tracked'
 
-    const content = [
+    const sections: string[] = [
       `# Last Session (saved by clauditor)`,
       ``,
       `- **Saved at:** ${data.savedAt}`,
@@ -37,10 +47,40 @@ export function saveSessionState(data: SessionStateData): void {
       `- **Session size:** ${data.turns} turns, ${data.tokensPerTurn}k tokens/turn`,
       `- **Waste factor:** ${data.wasteFactor}x`,
       `- **Files modified:** ${filesList}`,
-      ``,
-    ].join('\n')
+    ]
 
-    writeFileSync(LAST_SESSION_FILE, content)
+    if (data.filesRead && data.filesRead.length > 0) {
+      sections.push(`- **Files read:** ${data.filesRead.slice(0, 15).join(', ')}`)
+    }
+
+    if (data.originalTask) {
+      sections.push(``, `## Original Task`, data.originalTask)
+    }
+
+    if (data.gitCommits && data.gitCommits.length > 0) {
+      sections.push(``, `## Commits Made`)
+      for (const commit of data.gitCommits.slice(0, 10)) {
+        sections.push(`- ${commit}`)
+      }
+    }
+
+    if (data.keyCommands && data.keyCommands.length > 0) {
+      sections.push(``, `## Key Commands & Results`)
+      for (const cmd of data.keyCommands.slice(0, 10)) {
+        sections.push(`- ${cmd}`)
+      }
+    }
+
+    if (data.recentUserMessages && data.recentUserMessages.length > 0) {
+      sections.push(``, `## Recent User Messages`)
+      for (const msg of data.recentUserMessages) {
+        sections.push(`> ${msg}`)
+      }
+    }
+
+    sections.push(``)
+
+    writeFileSync(LAST_SESSION_FILE, sections.join('\n'))
   } catch {}
 }
 
@@ -71,6 +111,11 @@ export function extractSessionStateFromTranscript(
     let turnCount = 0
     const turnTokens: number[] = []
     const filesModified = new Set<string>()
+    const filesRead = new Set<string>()
+    const gitCommits: string[] = []
+    const keyCommands: string[] = []
+    const userMessages: string[] = []
+    let originalTask: string | null = null
 
     // Get cwd and branch from most recent user record
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -84,10 +129,21 @@ export function extractSessionStateFromTranscript(
       } catch {}
     }
 
-    // Scan all records for turns and files
+    // Scan all records
     for (const line of lines) {
       try {
         const r = JSON.parse(line)
+
+        // Extract user messages
+        if (r.type === 'user') {
+          const msg = extractUserMessage(r)
+          if (msg) {
+            userMessages.push(msg)
+            if (!originalTask) originalTask = msg
+          }
+        }
+
+        // Count turns
         if (r.type === 'assistant' && r.message?.usage) {
           const u = r.message.usage
           const total = (u.input_tokens || 0) + (u.output_tokens || 0) +
@@ -95,11 +151,62 @@ export function extractSessionStateFromTranscript(
           turnTokens.push(total)
           turnCount++
         }
+
+        // Extract tool calls
         if (r.type === 'assistant' && r.message?.content) {
           for (const block of r.message.content) {
-            if (block.type === 'tool_use' && (block.name === 'Edit' || block.name === 'Write')) {
+            if (block.type !== 'tool_use') continue
+
+            // Files modified
+            if (block.name === 'Edit' || block.name === 'Write') {
               const fp = block.input?.file_path
               if (fp) filesModified.add(fp.split('/').pop() || fp)
+            }
+
+            // Files read
+            if (block.name === 'Read') {
+              const fp = block.input?.file_path
+              if (fp) filesRead.add(fp.split('/').pop() || fp)
+            }
+
+            // Bash commands — extract git commits, test results, builds
+            if (block.name === 'Bash') {
+              const cmd = block.input?.command as string | undefined
+              if (!cmd) continue
+
+              // Git commits — various formats
+              if (cmd.includes('git') && cmd.includes('commit')) {
+                const match = cmd.match(/-m\s+["']([^"']+)["']/) ||
+                  cmd.match(/-m\s+"?\$\(cat <<[^)]+\n\s*([^\n]+)/) ||
+                  cmd.match(/commit\s+-m\s+"([^"]+)"/) ||
+                  cmd.match(/commit\s+-m\s+'([^']+)'/)
+                if (match) {
+                  gitCommits.push(match[1].trim().slice(0, 120))
+                }
+              }
+
+              // Key commands: tests, builds, deploys, installs
+              if (/\b(test|build|deploy|lint|format|install|migrate|seed)\b/i.test(cmd)) {
+                const shortCmd = cmd.split('\n')[0].slice(0, 100)
+                keyCommands.push(shortCmd)
+              }
+            }
+          }
+        }
+
+        // Also check tool results in user messages (where Claude Code puts them)
+        if (r.type === 'user' && Array.isArray(r.message?.content)) {
+          for (const block of r.message.content) {
+            if (block.type === 'tool_result' && typeof block.content === 'string') {
+              // Check for test results
+              if (/passed|failed|error/i.test(block.content) && block.content.length < 200) {
+                const resultLine = block.content.split('\n').find(
+                  (l: string) => /passed|failed|succeeded|error/i.test(l)
+                )
+                if (resultLine) {
+                  keyCommands.push(`→ ${resultLine.trim().slice(0, 100)}`)
+                }
+              }
             }
           }
         }
@@ -112,6 +219,19 @@ export function extractSessionStateFromTranscript(
     const current = turnTokens.slice(-5).reduce((a, b) => a + b, 0) / 5
     const wasteFactor = baseline > 0 ? Math.round(current / baseline) : 1
 
+    // Deduplicate key commands (same command run multiple times)
+    const uniqueCommands = [...new Set(keyCommands)].slice(0, 10)
+
+    // Get last 3 user messages (most recent decisions)
+    const recentUserMessages = userMessages
+      .slice(-3)
+      .map(m => m.slice(0, 200))
+
+    // Truncate original task
+    if (originalTask && originalTask.length > 300) {
+      originalTask = originalTask.slice(0, 300) + '...'
+    }
+
     return {
       savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
       branch,
@@ -119,11 +239,38 @@ export function extractSessionStateFromTranscript(
       tokensPerTurn: Math.round(current / 1000),
       wasteFactor,
       filesModified: Array.from(filesModified),
+      filesRead: Array.from(filesRead),
       cwd,
+      originalTask,
+      recentUserMessages,
+      gitCommits,
+      keyCommands: uniqueCommands,
     }
   } catch {
     return null
   }
+}
+
+/**
+ * Extract the text content from a user record.
+ */
+function extractUserMessage(record: Record<string, unknown>): string | null {
+  const msg = record.message as { content?: unknown } | undefined
+  if (!msg?.content) return null
+
+  if (typeof msg.content === 'string') {
+    return msg.content.trim() || null
+  }
+
+  if (Array.isArray(msg.content)) {
+    // Find text blocks, skip tool_result blocks
+    const textParts = (msg.content as Array<{ type: string; text?: string }>)
+      .filter(b => b.type === 'text' && b.text)
+      .map(b => b.text!)
+    return textParts.join(' ').trim() || null
+  }
+
+  return null
 }
 
 /**

@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
-import { saveSessionState as saveSState } from '../features/session-state.js'
+import { saveSessionState as saveSState, extractSessionStateFromTranscript } from '../features/session-state.js'
 import { readConfig } from '../config.js'
 import { loadCalibration } from '../features/calibration.js'
 import { homedir } from 'node:os'
@@ -89,16 +89,28 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
       writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blocked))
     } catch {}
 
-    // Save session state to ~/.clauditor/last-session.md
-    saveSState({
-      savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      branch: analysis.branch,
-      turns: analysis.turns,
-      tokensPerTurn: Math.round(analysis.current / 1000),
-      wasteFactor,
-      filesModified: analysis.filesModified,
-      cwd: analysis.cwd,
-    })
+    // Save rich session state to ~/.clauditor/last-session.md
+    // Use transcript extraction for full context (commits, commands, user messages)
+    const richState = extractSessionStateFromTranscript(sessionId, transcriptPath)
+    if (richState) {
+      saveSState(richState)
+    } else {
+      // Fallback to basic metadata
+      saveSState({
+        savedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        branch: analysis.branch,
+        turns: analysis.turns,
+        tokensPerTurn: Math.round(analysis.current / 1000),
+        wasteFactor,
+        filesModified: analysis.filesModified,
+        cwd: analysis.cwd,
+        originalTask: null,
+        recentUserMessages: [],
+        gitCommits: [],
+        keyCommands: [],
+        filesRead: [],
+      })
+    }
 
     logActivity({
       type: 'context_warning',
