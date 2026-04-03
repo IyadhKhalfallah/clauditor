@@ -109,6 +109,7 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
         gitCommits: [],
         keyCommands: [],
         filesRead: [],
+        lastAssistantMessage: null,
       })
     }
 

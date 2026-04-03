@@ -23,6 +23,8 @@ export interface SessionStateData {
   keyCommands: string[]
   /** Files read during the session */
   filesRead: string[]
+  /** Last assistant message (often contains next steps / plan) */
+  lastAssistantMessage: string | null
 }
 
 /**
@@ -78,6 +80,10 @@ export function saveSessionState(data: SessionStateData): void {
       }
     }
 
+    if (data.lastAssistantMessage) {
+      sections.push(``, `## Where We Left Off`, data.lastAssistantMessage)
+    }
+
     sections.push(``)
 
     writeFileSync(LAST_SESSION_FILE, sections.join('\n'))
@@ -116,6 +122,7 @@ export function extractSessionStateFromTranscript(
     const keyCommands: string[] = []
     const userMessages: string[] = []
     let originalTask: string | null = null
+    let lastAssistantMessage: string | null = null
 
     // Get cwd and branch from most recent user record
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -152,8 +159,16 @@ export function extractSessionStateFromTranscript(
           turnCount++
         }
 
-        // Extract tool calls
+        // Extract tool calls + last assistant text
         if (r.type === 'assistant' && r.message?.content) {
+          // Capture the last assistant text message (often contains plan/next steps)
+          const textBlocks = (r.message.content as Array<{ type: string; text?: string }>)
+            .filter((b: { type: string; text?: string }) => b.type === 'text' && b.text)
+            .map((b: { type: string; text?: string }) => b.text!)
+          if (textBlocks.length > 0) {
+            lastAssistantMessage = textBlocks.join('\n').trim()
+          }
+
           for (const block of r.message.content) {
             if (block.type !== 'tool_use') continue
 
@@ -245,6 +260,7 @@ export function extractSessionStateFromTranscript(
       recentUserMessages,
       gitCommits,
       keyCommands: uniqueCommands,
+      lastAssistantMessage: lastAssistantMessage ? lastAssistantMessage.slice(0, 500) : null,
     }
   } catch {
     return null
