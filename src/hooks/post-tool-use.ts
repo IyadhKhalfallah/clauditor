@@ -172,14 +172,17 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
       }
     }
 
-    // Check context window size — detect limit from actual usage
+    // Check context window size — detect model from transcript
     const lastTurn = turns[turns.length - 1]
     const contextSize =
       lastTurn.usage.input_tokens +
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
-    // If context > 200k, they're on extended context (Opus 1M)
-    const contextLimit = contextSize > 200_000 ? 1_000_000 : 200_000
+    // Detect model from the JSONL to get correct context limit
+    const { extractModel } = await import('../daemon/parser.js')
+    const model = extractModel(records)
+    const isOpus = model?.includes('opus') ?? false
+    const contextLimit = isOpus ? 1_000_000 : 200_000
     const pct = Math.round((contextSize / contextLimit) * 100)
 
     if (pct >= 95) {
@@ -415,16 +418,7 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
 
   if (turns.length < cal.minTurns) return null
 
-  // Check if already blocked
-  let blocked: Record<string, boolean> = {}
-  try {
-    blocked = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
-  } catch {}
-  // Use a separate key for PostToolUse blocks vs UserPromptSubmit blocks
-  const key = `post-${sessionId}`
-  if (blocked[key]) return null
-
-  // Calculate waste factor
+  // Calculate waste factor first, then check if we should re-block
   const turnTokens = turns.map((t) =>
     t.usage.input_tokens + t.usage.output_tokens +
     t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
@@ -435,11 +429,21 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
 
   if (wasteFactor < cal.wasteThreshold) return null
 
-  // Mark as blocked
-  blocked[key] = true
+  // Re-block at every 2x increase: if we blocked at 5x, block again at 7x, 9x, etc.
+  // Tracks the waste level when last blocked, not just true/false.
+  let blockedAt: Record<string, number> = {}
+  try {
+    blockedAt = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
+  } catch {}
+  const key = `post-${sessionId}`
+  const lastBlockedWaste = blockedAt[key] || 0
+  if (lastBlockedWaste > 0 && wasteFactor < lastBlockedWaste + 2) return null
+
+  // Mark as blocked at this waste level
+  blockedAt[key] = wasteFactor
   try {
     mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-    writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blocked))
+    writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blockedAt))
   } catch {}
 
   // Save session state to ~/.clauditor/last-session.md (not CLAUDE.md)
