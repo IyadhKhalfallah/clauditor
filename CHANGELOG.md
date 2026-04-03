@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.15.0...v1.16.0) (2026-04-03)
+
+
+### Features
+
+* add `clauditor share` command, default to report, fix double-block ([7171d2e](https://github.com/IyadhKhalfallah/clauditor/commit/7171d2e18aec14669119322d4697ed9848fa500b))
+* add `clauditor share` command, default to report, fix double-block ([e8e921b](https://github.com/IyadhKhalfallah/clauditor/commit/e8e921bee35b8af6848fc85344925c2fb043f3c4))
+
 ## [1.15.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.14.0...v1.15.0) (2026-04-03)
 
 
