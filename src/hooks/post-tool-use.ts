@@ -12,6 +12,7 @@ import { estimateQuotaBurnRate } from '../features/quota-burn.js'
 import { logActivity } from '../features/activity-log.js'
 import { saveSessionState, extractSessionStateFromTranscript, findTranscriptPathSync as findTranscriptSync } from '../features/session-state.js'
 import { readConfig } from '../config.js'
+import { loadCalibration } from '../features/calibration.js'
 
 /**
  * PostToolUse hook handler.
@@ -407,7 +408,12 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
 function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): HookDecision | null {
   const config = readConfig()
   if (!config.rotation.enabled) return null
-  if (turns.length < 30) return null
+
+  // Use calibrated threshold (auto-computed from user's own session history)
+  // Falls back to conservative 10x / 30 turns if not enough data
+  const cal = loadCalibration()
+
+  if (turns.length < cal.minTurns) return null
 
   // Check if already blocked
   let blocked: Record<string, boolean> = {}
@@ -427,7 +433,7 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
   const current = turnTokens.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
   const wasteFactor = baseline > 0 ? Math.round(current / baseline) : 1
 
-  if (wasteFactor < 10) return null
+  if (wasteFactor < cal.wasteThreshold) return null
 
   // Mark as blocked
   blocked[key] = true
@@ -469,7 +475,8 @@ const ROTATION_NUDGE_FILE = resolve(homedir(), '.clauditor', 'rotation-nudge.jso
 function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string | null {
   const config = readConfig()
   if (!config.rotation.enabled) return null
-  if (turns.length < config.rotation.minTurns) return null
+  const cal = loadCalibration()
+  if (turns.length < cal.minTurns) return null
 
   // Check if already nudged this session
   let nudged: Record<string, boolean> = {}
@@ -485,7 +492,15 @@ function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string |
       t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
   }, 0) / recentTurns.length
 
-  if (avgTokens < config.rotation.threshold) return null
+  // Compute baseline from first 5 turns
+  const baselineTokens = turns.slice(0, 5).reduce((sum, t) =>
+    sum + t.usage.input_tokens + t.usage.output_tokens +
+    t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
+  ) / Math.min(5, turns.length)
+
+  // Use calibrated waste threshold
+  const wasteFactorLegacy = baselineTokens > 0 ? avgTokens / baselineTokens : 1
+  if (wasteFactorLegacy < cal.wasteThreshold) return null
 
   // Mark as nudged
   nudged[sessionId] = true

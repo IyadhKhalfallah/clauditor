@@ -101,7 +101,15 @@ export async function installHooks(): Promise<string[]> {
   // Write config if not present
   const { writeConfigIfMissing } = await import('./config.js')
   writeConfigIfMissing()
-  messages.push('Session rotation: ✓ enabled (blocks at 10x waste, saves to ~/.clauditor/)')
+
+  // Auto-calibrate from session history
+  const { calibrate } = await import('./features/calibration.js')
+  const cal = calibrate()
+  if (cal.confident) {
+    messages.push(`Session rotation: ✓ calibrated — blocks at ${cal.wasteThreshold}x waste, ${cal.minTurns}+ turns (from ${cal.sessionsAnalyzed} sessions)`)
+  } else {
+    messages.push(`Session rotation: ✓ enabled — using conservative 10x threshold (will auto-calibrate after more sessions)`)
+  }
 
   return messages
 }

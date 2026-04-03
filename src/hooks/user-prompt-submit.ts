@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { saveSessionState as saveSState } from '../features/session-state.js'
 import { readConfig } from '../config.js'
+import { loadCalibration } from '../features/calibration.js'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { logActivity } from '../features/activity-log.js'
@@ -23,8 +24,8 @@ interface UserPromptSubmitInput {
   prompt?: string
 }
 
-const WASTE_THRESHOLD = 10  // 10x waste factor triggers block
-const MIN_TURNS = 30        // don't block early sessions
+// Thresholds are auto-calibrated from user's session history.
+// See src/features/calibration.ts for the algorithm.
 const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.json')
 
 export async function handleUserPromptSubmitHook(): Promise<void> {
@@ -65,7 +66,8 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
     }
 
     const analysis = analyzeSession(transcriptPath)
-    if (!analysis || analysis.turns < MIN_TURNS) {
+    const cal = loadCalibration()
+    if (!analysis || analysis.turns < cal.minTurns) {
       process.stdout.write('{}')
       return
     }
@@ -74,7 +76,7 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
       ? Math.round(analysis.current / analysis.baseline)
       : 0
 
-    if (wasteFactor < WASTE_THRESHOLD) {
+    if (wasteFactor < cal.wasteThreshold) {
       process.stdout.write('{}')
       return
     }
@@ -178,7 +180,7 @@ function analyzeSession(transcriptPath: string): SessionAnalysis | null {
       } catch {}
     }
 
-    if (turnTokens.length < MIN_TURNS) return null
+    if (turnTokens.length < 20) return null // minimum for analysis, not blocking
 
     const baseline = turnTokens.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
     const current = turnTokens.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)

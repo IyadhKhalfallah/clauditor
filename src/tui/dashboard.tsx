@@ -2,6 +2,7 @@ import React from 'react'
 import { Box, Text } from 'ink'
 import type { SessionState } from '../types.js'
 import { estimateCost, getPricingForModel } from '../features/cost-tracker.js'
+import { loadCalibration } from '../features/calibration.js'
 
 interface DashboardProps {
   session: SessionState
@@ -29,15 +30,17 @@ export function Dashboard({ session }: DashboardProps) {
     : baseline
 
   const wasteFactor = baseline > 0 ? Math.round(current / baseline) : 1
-  const willBlock = wasteFactor >= 10 && session.turns.length >= 30
+  const cal = loadCalibration()
+  const willBlock = wasteFactor >= cal.wasteThreshold && session.turns.length >= cal.minTurns
 
   // Waste bar: 1x = empty, 10x = full (block threshold)
   const barWidth = 30
-  const barPct = Math.min(1, (wasteFactor - 1) / 9) // 1x=0%, 10x=100%
+  const barPct = Math.min(1, (wasteFactor - 1) / (cal.wasteThreshold - 1)) // 1x=0%, threshold=100%
   const filled = Math.round(barPct * barWidth)
   const empty = barWidth - filled
   const wasteBar = '█'.repeat(filled) + '░'.repeat(empty)
-  const barColor = willBlock ? 'red' : wasteFactor >= 7 ? 'yellow' : 'green'
+  const warningZone = Math.round(cal.wasteThreshold * 0.7)
+  const barColor = willBlock ? 'red' : wasteFactor >= warningZone ? 'yellow' : 'green'
 
   // Cache status
   const cacheRatio = session.cacheHealth.lastCacheRatio
@@ -104,7 +107,8 @@ export function Dashboard({ session }: DashboardProps) {
         <Box marginTop={1}>
           <Text dimColor>
             clauditor tracks tokens/turn as your session grows.{'\n'}
-            At 10x waste (30+ turns), it saves context to CLAUDE.md and blocks.
+            At {cal.wasteThreshold}x waste ({cal.minTurns}+ turns), it saves context and blocks.{' '}
+            {cal.confident ? '(auto-calibrated from your history)' : '(will auto-calibrate after more sessions)'}
           </Text>
         </Box>
       )}

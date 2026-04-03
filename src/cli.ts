@@ -492,6 +492,35 @@ program
     console.log('')
   })
 
+// ─── clauditor calibrate ──────────────────────────────────────────
+
+program
+  .command('calibrate')
+  .description('Auto-calibrate rotation threshold from your session history')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { calibrate, formatCalibration } = await import('./features/calibration.js')
+
+    if (!options.json) console.log('Scanning session history...')
+    const result = calibrate()
+
+    if (options.json) {
+      const { sessionProfiles, ...summary } = result
+      console.log(JSON.stringify(summary, null, 2))
+      return
+    }
+
+    console.log('\n' + formatCalibration(result))
+
+    if (result.confident) {
+      console.log(`\n  ✓ Calibrated: will block at ${result.wasteThreshold}x waste, ${result.minTurns}+ turns`)
+    } else {
+      console.log(`\n  ⚠ Not enough data — using conservative 10x threshold`)
+      console.log(`    Use Claude Code for a few more sessions, then run \`clauditor calibrate\` again`)
+    }
+    console.log('')
+  })
+
 // ─── clauditor sessions ──────────────────────────────────────────
 
 program
