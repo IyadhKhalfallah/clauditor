@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve, sep, basename } from 'node:path'
+import { isBuggyCacheVersion } from '../daemon/parser.js'
 
 export interface SessionReport {
   file: string
@@ -11,6 +12,8 @@ export interface SessionReport {
   wasteFactor: number
   totalTokens: number
   date: Date
+  /** Claude Code version used in this session */
+  ccVersion: string | null
 }
 
 export interface QuotaBrief {
@@ -24,6 +27,8 @@ export interface QuotaBrief {
   tokensWithRotation: number
   /** Number of sessions where clauditor actually blocked */
   sessionsBlocked: number
+  /** Number of sessions running on buggy CC versions (2.1.69-2.1.89) */
+  sessionsOnBuggyVersion: number
 }
 
 /**
@@ -42,7 +47,7 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
       .filter(d => d.isDirectory())
       .map(d => d.name)
   } catch {
-    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [], tokensWithRotation: 0, sessionsBlocked: 0 }
+    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [], tokensWithRotation: 0, sessionsBlocked: 0, sessionsOnBuggyVersion: 0 }
   }
 
   for (const projDir of projectDirs) {
@@ -113,6 +118,7 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
     sessions,
     tokensWithRotation,
     sessionsBlocked,
+    sessionsOnBuggyVersion: sessions.filter(s => s.ccVersion && isBuggyCacheVersion(s.ccVersion)).length,
   }
 }
 
@@ -128,10 +134,17 @@ function analyzeSessionFile(
   let totalTokens = 0
   let isAllDuplicate = true
   let lastTimestamp: string | null = null
+  let ccVersion: string | null = null
 
   for (const line of lines) {
     try {
       const r = JSON.parse(line)
+
+      // Extract CC version from user records
+      if (r.type === 'user' && r.version && !ccVersion) {
+        ccVersion = r.version
+      }
+
       if (r.type === 'assistant' && r.message?.usage) {
         const msgId = r.message?.id
         if (msgId && seenMessageIds.has(msgId)) {
@@ -171,5 +184,6 @@ function analyzeSessionFile(
     wasteFactor,
     totalTokens,
     date: lastTimestamp ? new Date(lastTimestamp) : new Date(),
+    ccVersion,
   }
 }
