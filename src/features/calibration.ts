@@ -139,8 +139,9 @@ export function calibrate(): CalibrationData {
     confident = true
   }
 
-  // Clamp to reasonable range: minimum 3x, maximum 15x
-  wasteThreshold = Math.max(3, Math.min(15, Math.round(wasteThreshold)))
+  // Clamp to reasonable range: minimum 5x, maximum 15x
+  // Below 5x is too disruptive — user is mid-task and the session is still productive
+  wasteThreshold = Math.max(5, Math.min(15, Math.round(wasteThreshold)))
 
   // Compute minTurns: the median turn count where sessions reach 2x waste
   // (don't block before sessions have done meaningful work)
@@ -209,24 +210,24 @@ function analyzeSession(filePath: string): SessionProfile | null {
     const wasteFactor = baseline > 0 ? final / baseline : 1
 
     // Find break-even point:
-    // At each turn, compute: "if I rotated here, would the rotation cost
-    // (5 turns of warmup at baseline) be less than the extra overhead
-    // I'd pay by continuing?"
+    // Rotation cost is NOT just 5 turns of cache warmup. It includes:
+    // - Cache warmup (~5 turns)
+    // - Human context switch (~5-10 min of productivity)
+    // - Claude re-reading CLAUDE.md and re-establishing context
+    // - Loss of in-session decisions not captured in CLAUDE.md
     //
-    // Extra overhead per turn = current_tokens - baseline
-    // Rotation cost = 5 * baseline (warmup turns)
-    // Break-even: rotation cost < remaining_turns * extra_overhead_per_turn
+    // Estimated total rotation cost: 30 turns worth of baseline tokens
+    // This is conservative — if rotation is cheaper than this, it's
+    // definitely worth it. If it's more expensive, we let the session continue.
     //
-    // Simplified: at turn T, waste = tokens[T] / baseline
-    // Rotation saves (waste - 1) * baseline per turn for remaining turns
-    // Rotation costs 5 * baseline (one-time)
-    // Break-even when: 5 * baseline < remaining * (waste - 1) * baseline
-    // → 5 < remaining * (waste - 1)
-    // → remaining > 5 / (waste - 1)
+    // Break-even: 30 * baseline < remaining * (waste - 1) * baseline
+    // → 30 < remaining * (waste - 1)
+    // → remaining > 30 / (waste - 1)
     //
-    // For waste = 3x: remaining > 2.5 turns (almost always worth it)
-    // For waste = 5x: remaining > 1.25 turns (always worth it)
-    // For waste = 2x: remaining > 5 turns (worth it if > 5 turns left)
+    // For waste = 3x: remaining > 15 turns
+    // For waste = 5x: remaining > 7.5 turns
+    // For waste = 10x: remaining > 3.3 turns
+    const ROTATION_COST_TURNS = 30
 
     let breakEvenTurn: number | null = null
     let breakEvenWaste: number | null = null
@@ -237,7 +238,7 @@ function analyzeSession(filePath: string): SessionProfile | null {
       const waste = baseline > 0 ? currentAvg / baseline : 1
       const remaining = turnTokens.length - i
 
-      if (waste > 1 && remaining > 5 / (waste - 1)) {
+      if (waste > 1 && remaining > ROTATION_COST_TURNS / (waste - 1)) {
         breakEvenTurn = i
         breakEvenWaste = Math.round(waste * 10) / 10
         break
