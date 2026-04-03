@@ -121,6 +121,11 @@ export function App({ store, projectPath }: AppProps) {
               Worst: {brief.worstSession.label} ({brief.worstSession.turns} turns, {brief.worstSession.wasteFactor}x waste — {brief.worstSession.baselineK}k→{brief.worstSession.currentK}k/turn)
             </Text>
           )}
+          {brief.totalTokens > brief.tokensWithRotation && (
+            <Text color="green">
+              With rotation: {Math.round(brief.tokensWithRotation / 1e6)}M tokens instead of {Math.round(brief.totalTokens / 1e6)}M ({Math.round((brief.totalTokens - brief.tokensWithRotation) / brief.totalTokens * 100)}% savings)
+            </Text>
+          )}
         </Box>
       )}
 

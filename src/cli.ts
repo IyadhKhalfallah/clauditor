@@ -584,6 +584,20 @@ program
       console.log(`  With rotation, this session would have used ~${Math.round(w.turns * w.baselineK * 2 / 1000)}M tokens instead of ${Math.round(w.totalTokens / 1e6)}M`)
     }
 
+    // Clauditor impact
+    const saved = brief.totalTokens - brief.tokensWithRotation
+    if (saved > 0) {
+      const pctSaved = Math.round(saved / brief.totalTokens * 100)
+      console.log('')
+      console.log('  ' + '─'.repeat(58))
+      console.log(`  \x1b[36mclauditor impact\x1b[0m`)
+      if (brief.sessionsBlocked > 0) {
+        console.log(`  Blocked ${brief.sessionsBlocked} session${brief.sessionsBlocked > 1 ? 's' : ''} from burning more quota`)
+      }
+      console.log(`  With rotation on all sessions: ${Math.round(brief.tokensWithRotation / 1e6)}M tokens instead of ${Math.round(brief.totalTokens / 1e6)}M`)
+      console.log(`  \x1b[32mPotential savings: ${Math.round(saved / 1e6)}M tokens (${pctSaved}% less quota)\x1b[0m`)
+    }
+
     console.log('')
   })
 
