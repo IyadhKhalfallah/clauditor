@@ -211,6 +211,34 @@ export function extractModel(records: SessionRecord[]): string | null {
   return null
 }
 
+/**
+ * Extract Claude Code version from session records.
+ * Reads from user records which have a `version` field.
+ */
+export function extractVersion(records: SessionRecord[]): string | null {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i]
+    if (record.type === 'user' && 'version' in record) {
+      const version = (record as { version?: string }).version
+      if (version) return version
+    }
+  }
+  return null
+}
+
+/**
+ * Known buggy Claude Code version range: 2.1.69 - 2.1.89
+ * These versions have a prompt caching bug (deferred tools break cache prefix matching)
+ * that causes 10-20x token consumption. Fixed in v2.1.90+.
+ */
+export function isBuggyCacheVersion(version: string): boolean {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
+  if (!match) return false
+  const [, major, minor, patch] = match.map(Number)
+  if (major !== 2 || minor !== 1) return false
+  return patch >= 69 && patch <= 89
+}
+
 export interface SessionContext {
   cwd: string | null
   gitBranch: string | null

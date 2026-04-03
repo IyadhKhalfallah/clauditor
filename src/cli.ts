@@ -598,6 +598,14 @@ program
       console.log(`  \x1b[32mPotential savings: ${Math.round(saved / 1e6)}M tokens (${pctSaved}% less quota)\x1b[0m`)
     }
 
+    if (brief.sessionsOnBuggyVersion > 0) {
+      console.log('')
+      console.log('  ' + '─'.repeat(58))
+      console.log(`  \x1b[31m⚠ ${brief.sessionsOnBuggyVersion} session${brief.sessionsOnBuggyVersion > 1 ? 's' : ''} ran on Claude Code 2.1.69-2.1.89 (known cache bug)\x1b[0m`)
+      console.log(`  This bug causes 10-20x token burn from broken prompt caching.`)
+      console.log(`  Fix: upgrade to v2.1.91+ with \x1b[1mclaude update\x1b[0m`)
+    }
+
     console.log('')
   })
 

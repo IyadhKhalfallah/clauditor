@@ -172,6 +172,22 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
       }
     }
 
+    // Check Claude Code version for known cache bugs
+    const { extractModel, extractVersion, isBuggyCacheVersion } = await import('../daemon/parser.js')
+    const ccVersion = extractVersion(records)
+    if (ccVersion && isBuggyCacheVersion(ccVersion)) {
+      warnings.push(
+        `[clauditor WARNING — BUGGY VERSION]: You're running Claude Code ${ccVersion} which has a known prompt caching bug ` +
+        `that causes 10-20x token consumption. Run \`claude update\` to upgrade to v2.1.91+ which fixes this. ` +
+        `This is likely the #1 cause of your quota burning fast.`
+      )
+      logActivity({
+        type: 'cache_warning',
+        session: sessionId.slice(0, 8),
+        message: `Buggy CC version detected: ${ccVersion} (cache bug in 2.1.69-2.1.89)`,
+      }).catch(() => {})
+    }
+
     // Check context window size — detect model from transcript
     const lastTurn = turns[turns.length - 1]
     const contextSize =
@@ -179,7 +195,6 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
     // Detect model from the JSONL to get correct context limit
-    const { extractModel } = await import('../daemon/parser.js')
     const model = extractModel(records)
     const isOpus = model?.includes('opus') ?? false
     const contextLimit = isOpus ? 1_000_000 : 200_000
