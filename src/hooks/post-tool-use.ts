@@ -464,8 +464,12 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
     reason:
       `clauditor: This session is using ${wasteFactor}x more quota per turn than when it started ` +
       `(${Math.round(baseline / 1000)}k → ${Math.round(current / 1000)}k tokens/turn). ` +
-      `Session state saved. ` +
-      `Tell the user to start a fresh session with \`claude\` to reduce quota usage ${wasteFactor}x.`,
+      `Session progress has been saved to ~/.clauditor/last-session.md.\n` +
+      `IMPORTANT — Tell the user:\n` +
+      `1. This session is burning ${wasteFactor}x more quota than necessary\n` +
+      `2. Their progress has been saved and won't be lost\n` +
+      `3. Run \`claude\` to start a fresh session — clauditor will automatically inject the saved context\n` +
+      `4. The fresh session will use ~${Math.round(baseline / 1000)}k tokens/turn instead of ${Math.round(current / 1000)}k`,
   }
 }
 
