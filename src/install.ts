@@ -20,26 +20,35 @@ interface HookCommand {
   command: string
 }
 
+// Detect if running via npx — if so, hooks need the npx prefix
+function getHookCommand(subcommand: string): string {
+  const isNpx = process.argv[1]?.includes('_npx') || process.env.npm_execpath?.includes('npx')
+  if (isNpx) {
+    return `npx -y @iyadhk/clauditor hook ${subcommand}`
+  }
+  return `clauditor hook ${subcommand}`
+}
+
 const CLAUDITOR_HOOKS: Record<string, HookEventConfig> = {
   UserPromptSubmit: {
     matcher: '',
-    hooks: [{ type: 'command', command: 'clauditor hook user-prompt-submit' }],
+    hooks: [{ type: 'command', command: getHookCommand('user-prompt-submit') }],
   },
   PreCompact: {
     matcher: '',
-    hooks: [{ type: 'command', command: 'clauditor hook pre-compact' }],
+    hooks: [{ type: 'command', command: getHookCommand('pre-compact') }],
   },
   SessionStart: {
     matcher: '',
-    hooks: [{ type: 'command', command: 'clauditor hook session-start' }],
+    hooks: [{ type: 'command', command: getHookCommand('session-start') }],
   },
   Stop: {
     matcher: '',
-    hooks: [{ type: 'command', command: 'clauditor hook stop' }],
+    hooks: [{ type: 'command', command: getHookCommand('stop') }],
   },
   PostToolUse: {
     matcher: '',
-    hooks: [{ type: 'command', command: 'clauditor hook post-tool-use' }],
+    hooks: [{ type: 'command', command: getHookCommand('post-tool-use') }],
   },
 }
 
