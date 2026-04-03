@@ -712,6 +712,10 @@ program
       lines.push(`• Worst session: ${w.turns} turns, ${w.wasteFactor}x waste (${w.baselineK}k→${w.currentK}k tokens/turn)`)
     }
 
+    if (brief.avgCacheRatio > 0) {
+      lines.push(`• Avg cache hit ratio: ${Math.round(brief.avgCacheRatio * 100)}%`)
+    }
+
     lines.push('')
     lines.push(`npm install -g @iyadhk/clauditor`)
 

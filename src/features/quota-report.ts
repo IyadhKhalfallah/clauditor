@@ -14,6 +14,8 @@ export interface SessionReport {
   date: Date
   /** Claude Code version used in this session */
   ccVersion: string | null
+  /** Average cache hit ratio (0-1) for this session */
+  avgCacheRatio: number
 }
 
 export interface QuotaBrief {
@@ -29,6 +31,8 @@ export interface QuotaBrief {
   sessionsBlocked: number
   /** Number of sessions running on buggy CC versions (2.1.69-2.1.89) */
   sessionsOnBuggyVersion: number
+  /** Average cache ratio across all sessions */
+  avgCacheRatio: number
 }
 
 /**
@@ -47,7 +51,7 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
       .filter(d => d.isDirectory())
       .map(d => d.name)
   } catch {
-    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [], tokensWithRotation: 0, sessionsBlocked: 0, sessionsOnBuggyVersion: 0 }
+    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [], tokensWithRotation: 0, sessionsBlocked: 0, sessionsOnBuggyVersion: 0, avgCacheRatio: 0 }
   }
 
   for (const projDir of projectDirs) {
@@ -119,6 +123,9 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
     tokensWithRotation,
     sessionsBlocked,
     sessionsOnBuggyVersion: sessions.filter(s => s.ccVersion && isBuggyCacheVersion(s.ccVersion)).length,
+    avgCacheRatio: sessions.length > 0
+      ? sessions.reduce((s, r) => s + r.avgCacheRatio, 0) / sessions.length
+      : 0,
   }
 }
 
@@ -264,6 +271,7 @@ function analyzeSessionFile(
   const lines = content.split('\n').filter(Boolean)
 
   const turnTotals: number[] = []
+  const cacheRatios: number[] = []
   let totalTokens = 0
   let isAllDuplicate = true
   let lastTimestamp: string | null = null
@@ -294,6 +302,12 @@ function analyzeSessionFile(
         turnTotals.push(total)
         totalTokens += total
         if (r.timestamp) lastTimestamp = r.timestamp
+
+        // Cache ratio
+        const totalInput = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+        if (totalInput > 0) {
+          cacheRatios.push((u.cache_read_input_tokens || 0) / totalInput)
+        }
       }
     } catch {
       // skip malformed lines
@@ -318,5 +332,8 @@ function analyzeSessionFile(
     totalTokens,
     date: lastTimestamp ? new Date(lastTimestamp) : new Date(),
     ccVersion,
+    avgCacheRatio: cacheRatios.length > 0
+      ? cacheRatios.reduce((a, b) => a + b, 0) / cacheRatios.length
+      : 0,
   }
 }
