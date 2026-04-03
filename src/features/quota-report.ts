@@ -116,6 +116,139 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
   }
 }
 
+export interface HourlyBucket {
+  hour: number       // 0-23
+  turns: number
+  totalTokens: number
+  avgTokensPerTurn: number
+  avgCacheRatio: number
+}
+
+export interface TimeAnalysis {
+  hourly: HourlyBucket[]
+  peakAvgTokens: number    // avg tokens/turn during peak (9-17)
+  offPeakAvgTokens: number // avg tokens/turn during off-peak
+  peakMultiplier: number   // peak / off-peak ratio
+}
+
+/**
+ * Analyze token costs by hour of day across all sessions.
+ * This can reveal peak-hour pricing multipliers.
+ */
+export function computeTimeAnalysis(days: number = 7): TimeAnalysis {
+  const projectsDir = resolve(homedir(), '.claude/projects')
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const seenMessageIds = new Set<string>()
+
+  // Collect per-hour data
+  const hourData: Array<{ tokens: number[]; cacheRatios: number[] }> = Array.from(
+    { length: 24 }, () => ({ tokens: [], cacheRatios: [] })
+  )
+
+  let projectDirs: string[]
+  try {
+    projectDirs = readdirSync(projectsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name)
+  } catch {
+    return emptyTimeAnalysis()
+  }
+
+  for (const projDir of projectDirs) {
+    const projPath = resolve(projectsDir, projDir)
+    let files: string[]
+    try {
+      files = readdirSync(projPath).filter(f => f.endsWith('.jsonl'))
+    } catch {
+      continue
+    }
+
+    for (const file of files) {
+      const filePath = resolve(projPath, file)
+      try {
+        const stat = statSync(filePath)
+        if (stat.mtime < cutoff) continue
+        extractHourlyData(filePath, seenMessageIds, hourData)
+      } catch {
+        continue
+      }
+    }
+  }
+
+  const hourly: HourlyBucket[] = hourData.map((d, hour) => ({
+    hour,
+    turns: d.tokens.length,
+    totalTokens: d.tokens.reduce((a, b) => a + b, 0),
+    avgTokensPerTurn: d.tokens.length > 0
+      ? Math.round(d.tokens.reduce((a, b) => a + b, 0) / d.tokens.length)
+      : 0,
+    avgCacheRatio: d.cacheRatios.length > 0
+      ? d.cacheRatios.reduce((a, b) => a + b, 0) / d.cacheRatios.length
+      : 0,
+  }))
+
+  // Peak = 9am-5pm local, off-peak = rest
+  const peakTurns = hourly.filter(h => h.hour >= 9 && h.hour < 17)
+  const offPeakTurns = hourly.filter(h => h.hour < 9 || h.hour >= 17)
+
+  const peakTotal = peakTurns.reduce((s, h) => s + h.totalTokens, 0)
+  const peakCount = peakTurns.reduce((s, h) => s + h.turns, 0)
+  const offPeakTotal = offPeakTurns.reduce((s, h) => s + h.totalTokens, 0)
+  const offPeakCount = offPeakTurns.reduce((s, h) => s + h.turns, 0)
+
+  const peakAvg = peakCount > 0 ? Math.round(peakTotal / peakCount) : 0
+  const offPeakAvg = offPeakCount > 0 ? Math.round(offPeakTotal / offPeakCount) : 0
+
+  return {
+    hourly,
+    peakAvgTokens: peakAvg,
+    offPeakAvgTokens: offPeakAvg,
+    peakMultiplier: offPeakAvg > 0 ? Math.round((peakAvg / offPeakAvg) * 10) / 10 : 1,
+  }
+}
+
+function emptyTimeAnalysis(): TimeAnalysis {
+  return {
+    hourly: Array.from({ length: 24 }, (_, hour) => ({
+      hour, turns: 0, totalTokens: 0, avgTokensPerTurn: 0, avgCacheRatio: 0,
+    })),
+    peakAvgTokens: 0,
+    offPeakAvgTokens: 0,
+    peakMultiplier: 1,
+  }
+}
+
+function extractHourlyData(
+  filePath: string,
+  seenMessageIds: Set<string>,
+  hourData: Array<{ tokens: number[]; cacheRatios: number[] }>,
+): void {
+  const content = readFileSync(filePath, 'utf-8')
+  const lines = content.split('\n').filter(Boolean)
+
+  for (const line of lines) {
+    try {
+      const r = JSON.parse(line)
+      if (r.type === 'assistant' && r.message?.usage && r.timestamp) {
+        const msgId = r.message?.id
+        if (msgId && seenMessageIds.has(msgId)) continue
+        if (msgId) seenMessageIds.add(msgId)
+
+        const u = r.message.usage
+        const total = (u.input_tokens || 0) + (u.output_tokens || 0) +
+          (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+
+        const totalInput = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+        const cacheRatio = totalInput > 0 ? (u.cache_read_input_tokens || 0) / totalInput : 0
+
+        const hour = new Date(r.timestamp).getHours()
+        hourData[hour].tokens.push(total)
+        hourData[hour].cacheRatios.push(cacheRatio)
+      }
+    } catch {}
+  }
+}
+
 function analyzeSessionFile(
   filePath: string,
   label: string,
