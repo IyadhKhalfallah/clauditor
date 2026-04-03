@@ -52,7 +52,8 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
     blocked = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
   } catch {}
 
-  if (blocked[hookInput.session_id]) {
+  // Skip if already blocked by either UserPromptSubmit or PostToolUse
+  if (blocked[hookInput.session_id] || blocked[`post-${hookInput.session_id}`]) {
     process.stdout.write('{}')
     return
   }

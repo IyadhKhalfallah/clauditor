@@ -601,6 +601,75 @@ program
     console.log('')
   })
 
+// ─── clauditor share ─────────────────────────────────────────────
+
+program
+  .command('share')
+  .description('Generate a shareable summary of your Claude Code usage')
+  .option('-d, --days <n>', 'Number of days to look back', '7')
+  .action(async (options) => {
+    const { computeQuotaBrief } = await import('./features/quota-report.js')
+    const days = parseInt(options.days, 10) || 7
+    const brief = computeQuotaBrief(days)
+
+    if (brief.totalSessions === 0) {
+      console.log('No sessions found in the last ' + days + ' days.')
+      return
+    }
+
+    const saved = brief.totalTokens - brief.tokensWithRotation
+    const pctSaved = brief.totalTokens > 0 ? Math.round(saved / brief.totalTokens * 100) : 0
+
+    const lines: string[] = []
+    lines.push(`My Claude Code usage this week (via clauditor):`)
+    lines.push('')
+    lines.push(`• ${brief.totalSessions} sessions, ${brief.sessionsOver5x > 0 ? brief.sessionsOver5x + ' hit 5x+ waste' : 'all efficient'}`)
+    lines.push(`• ${Math.round(brief.totalTokens / 1e6)}M tokens used`)
+
+    if (pctSaved > 0) {
+      lines.push(`• With session rotation: ${Math.round(brief.tokensWithRotation / 1e6)}M tokens (${pctSaved}% less quota)`)
+    }
+
+    if (brief.sessionsBlocked > 0) {
+      lines.push(`• clauditor blocked ${brief.sessionsBlocked} session${brief.sessionsBlocked > 1 ? 's' : ''} before they burned more quota`)
+    }
+
+    if (brief.worstSession && brief.worstSession.wasteFactor >= 3) {
+      const w = brief.worstSession
+      lines.push(`• Worst session: ${w.turns} turns, ${w.wasteFactor}x waste (${w.baselineK}k→${w.currentK}k tokens/turn)`)
+    }
+
+    lines.push('')
+    lines.push(`npm install -g @iyadhk/clauditor`)
+
+    const output = lines.join('\n')
+    console.log(output)
+
+    // Try to copy to clipboard
+    try {
+      const { execSync } = await import('node:child_process')
+      const platform = process.platform
+      if (platform === 'darwin') {
+        execSync('pbcopy', { input: output })
+        console.log('\n\x1b[32m✓ Copied to clipboard\x1b[0m')
+      } else if (platform === 'linux') {
+        try {
+          execSync('xclip -selection clipboard', { input: output })
+          console.log('\n\x1b[32m✓ Copied to clipboard\x1b[0m')
+        } catch {
+          try {
+            execSync('xsel --clipboard --input', { input: output })
+            console.log('\n\x1b[32m✓ Copied to clipboard\x1b[0m')
+          } catch {
+            // No clipboard tool available — that's fine
+          }
+        }
+      }
+    } catch {
+      // Clipboard copy failed silently
+    }
+  })
+
 // ─── clauditor sessions ──────────────────────────────────────────
 
 program
@@ -877,6 +946,11 @@ if (!isHook) {
       })
     }
   } catch {}
+}
+
+// Default command: if no subcommand given, run `report`
+if (process.argv.length <= 2) {
+  process.argv.push('report')
 }
 
 program.parse()
