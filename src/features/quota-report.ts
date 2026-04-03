@@ -20,6 +20,10 @@ export interface QuotaBrief {
   sessionsOver5x: number
   worstSession: SessionReport | null
   sessions: SessionReport[]
+  /** Estimated tokens if every session was rotated at optimal points */
+  tokensWithRotation: number
+  /** Number of sessions where clauditor actually blocked */
+  sessionsBlocked: number
 }
 
 /**
@@ -38,7 +42,7 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
       .filter(d => d.isDirectory())
       .map(d => d.name)
   } catch {
-    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [] }
+    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [], tokensWithRotation: 0, sessionsBlocked: 0 }
   }
 
   for (const projDir of projectDirs) {
@@ -75,6 +79,31 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
 
   const totalTokens = sessions.reduce((s, r) => s + r.totalTokens, 0)
 
+  // Estimate what tokens would be with rotation:
+  // If a session has waste factor W and T turns, rotating every 30 turns
+  // means each chunk starts fresh at baseline. Rough estimate:
+  // rotated cost ≈ turns × baseline × 2 (avg growth within each 30-turn chunk)
+  const tokensWithRotation = sessions.reduce((s, r) => {
+    if (r.wasteFactor <= 2) return s + r.totalTokens // already efficient
+    return s + r.turns * r.baselineK * 2 * 1000
+  }, 0)
+
+  // Count blocked sessions from activity log
+  let sessionsBlocked = 0
+  try {
+    const activityPath = resolve(homedir(), '.clauditor', 'activity.log')
+    const activityContent = readFileSync(activityPath, 'utf-8')
+    const cutoffTime = cutoff.getTime()
+    for (const line of activityContent.split('\n')) {
+      if (!line) continue
+      try {
+        const event = JSON.parse(line)
+        if (new Date(event.timestamp).getTime() < cutoffTime) continue
+        if (event.message && event.message.includes('BLOCKED')) sessionsBlocked++
+      } catch {}
+    }
+  } catch {}
+
   return {
     totalSessions: sessions.length,
     totalTokens,
@@ -82,6 +111,8 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
     sessionsOver5x: sessions.filter(s => s.wasteFactor >= 5).length,
     worstSession: sessions[0] || null,
     sessions,
+    tokensWithRotation,
+    sessionsBlocked,
   }
 }
 
