@@ -781,4 +781,22 @@ async function loadConfig(): Promise<ClauditorConfig> {
   return DEFAULT_CONFIG
 }
 
+// Check for updates (cached, non-blocking) — skip for hook subcommands
+const args = process.argv.slice(2)
+const isHook = args[0] === 'hook'
+
+if (!isHook) {
+  try {
+    const { checkForUpdate } = await import('./features/update-check.js')
+    const latest = checkForUpdate(pkg.version)
+    if (latest) {
+      // Show after command output
+      process.on('exit', () => {
+        console.error(`\n  clauditor update available: ${pkg.version} → ${latest}`)
+        console.error(`  Run: npm install -g @iyadhk/clauditor@latest\n`)
+      })
+    }
+  } catch {}
+}
+
 program.parse()
