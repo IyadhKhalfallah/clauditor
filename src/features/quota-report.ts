@@ -42,7 +42,7 @@ export function computeQuotaBrief(days: number = 7): QuotaBrief {
       .filter(d => d.isDirectory())
       .map(d => d.name)
   } catch {
-    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [] }
+    return { totalSessions: 0, totalTokens: 0, sessionsOver3x: 0, sessionsOver5x: 0, worstSession: null, sessions: [], tokensWithRotation: 0, sessionsBlocked: 0 }
   }
 
   for (const projDir of projectDirs) {
