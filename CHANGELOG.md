@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.15.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.14.0...v1.15.0) (2026-04-03)
+
+
+### Features
+
+* show clauditor impact in report and dashboard ([8cb64ab](https://github.com/IyadhKhalfallah/clauditor/commit/8cb64abb5a2342909a90a7eda295f5abb5bd274d))
+* show clauditor impact in report and dashboard ([fcad8d6](https://github.com/IyadhKhalfallah/clauditor/commit/fcad8d6f5bee76c1dafb270399d9734aa8e6df78))
+
+
+### Bug Fixes
+
+* add missing fields to early return in computeQuotaBrief ([975ad8d](https://github.com/IyadhKhalfallah/clauditor/commit/975ad8d5c4e0fabfa5f61b0e4dc62bee58ce769a))
+
 ## [1.14.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.13.2...v1.14.0) (2026-04-03)
 
 
