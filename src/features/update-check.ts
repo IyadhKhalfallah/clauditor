@@ -17,13 +17,26 @@ interface VersionCache {
  * Cached for 24h to avoid slowing down every command.
  * Returns the latest version string, or null if current is up to date.
  */
+/**
+ * Simple semver comparison: is `a` newer than `b`?
+ */
+function isNewer(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true
+    if ((pa[i] || 0) < (pb[i] || 0)) return false
+  }
+  return false
+}
+
 export function checkForUpdate(currentVersion: string): string | null {
   // Read cache
   try {
     const cache: VersionCache = JSON.parse(readFileSync(VERSION_CACHE, 'utf-8'))
     if (Date.now() - cache.checkedAt < CHECK_INTERVAL_MS) {
       // Cache is fresh
-      if (cache.latest && cache.latest !== currentVersion) {
+      if (cache.latest && isNewer(cache.latest, currentVersion)) {
         return cache.latest
       }
       return null
@@ -46,7 +59,7 @@ export function checkForUpdate(currentVersion: string): string | null {
       }))
     } catch {}
 
-    if (result && result !== currentVersion) {
+    if (result && isNewer(result, currentVersion)) {
       return result
     }
   } catch {
