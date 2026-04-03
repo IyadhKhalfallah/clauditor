@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.12.1...v1.13.0) (2026-04-03)
+
+
+### Features
+
+* auto-calibrate rotation threshold from user's own session history ([a717d11](https://github.com/IyadhKhalfallah/clauditor/commit/a717d11eff031c56eb28c50e9f9cf65a6d397f72))
+* auto-check for updates on CLI commands (cached 24h, skipped for hooks) ([6c48ca0](https://github.com/IyadhKhalfallah/clauditor/commit/6c48ca0fa65eccb062d44356ccb6d794e5754331))
+
 ## [1.12.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.12.0...v1.12.1) (2026-04-02)
 
 
