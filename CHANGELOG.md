@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.17.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.16.0...v1.17.0) (2026-04-03)
+
+
+### Features
+
+* support npx installation — detect npx and register hooks with n… ([f4ffe78](https://github.com/IyadhKhalfallah/clauditor/commit/f4ffe78d31441e35ea1288bf66a0d8cf658b8c01))
+* support npx installation — detect npx and register hooks with npx prefix ([c39b3da](https://github.com/IyadhKhalfallah/clauditor/commit/c39b3da0a399c2ce22fe62d6e5956a93de2ed643))
+
 ## [1.16.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.15.0...v1.16.0) (2026-04-03)
 
 
