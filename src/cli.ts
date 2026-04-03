@@ -609,6 +609,71 @@ program
     console.log('')
   })
 
+// ─── clauditor time ──────────────────────────────────────────────
+
+program
+  .command('time')
+  .description('Analyze token usage by time of day — detect peak hour impact')
+  .option('-d, --days <n>', 'Number of days to look back', '7')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { computeTimeAnalysis } = await import('./features/quota-report.js')
+    const days = parseInt(options.days, 10) || 7
+    const analysis = computeTimeAnalysis(days)
+
+    if (options.json) {
+      console.log(JSON.stringify(analysis, null, 2))
+      return
+    }
+
+    const hasData = analysis.hourly.some(h => h.turns > 0)
+    if (!hasData) {
+      console.log('No session data found in the last ' + days + ' days.')
+      return
+    }
+
+    console.log('')
+    console.log(`  Token Usage by Hour — last ${days} days`)
+    console.log('  ' + '─'.repeat(58))
+    console.log('')
+
+    const maxAvg = Math.max(...analysis.hourly.map(h => h.avgTokensPerTurn))
+
+    for (const h of analysis.hourly) {
+      if (h.turns === 0) continue
+      const barLen = maxAvg > 0 ? Math.round((h.avgTokensPerTurn / maxAvg) * 30) : 0
+      const bar = '█'.repeat(barLen)
+      const isPeak = h.hour >= 9 && h.hour < 17
+      const color = isPeak ? '\x1b[33m' : '\x1b[32m'
+      const reset = '\x1b[0m'
+      const hourStr = `${String(h.hour).padStart(2, '0')}:00`
+      const cacheStr = `${Math.round(h.avgCacheRatio * 100)}%`
+
+      console.log(
+        `  ${hourStr}  ` +
+        `${(Math.round(h.avgTokensPerTurn / 1000) + 'k').padStart(5)}/turn  ` +
+        `${String(h.turns).padStart(4)} turns  ` +
+        `cache ${cacheStr.padStart(4)}  ` +
+        `${color}${bar}${reset}`
+      )
+    }
+
+    console.log('')
+    console.log('  ' + '─'.repeat(58))
+    console.log(`  \x1b[33mPeak (9am-5pm):\x1b[0m    ${Math.round(analysis.peakAvgTokens / 1000)}k avg tokens/turn`)
+    console.log(`  \x1b[32mOff-peak:\x1b[0m          ${Math.round(analysis.offPeakAvgTokens / 1000)}k avg tokens/turn`)
+
+    if (analysis.peakMultiplier > 1.3) {
+      console.log(`  \x1b[31mPeak multiplier:   ${analysis.peakMultiplier}x (peak hours cost ${analysis.peakMultiplier}x more per turn)\x1b[0m`)
+    } else if (analysis.peakMultiplier > 1) {
+      console.log(`  Peak multiplier:   ${analysis.peakMultiplier}x (minimal difference)`)
+    } else {
+      console.log(`  No significant peak/off-peak difference detected.`)
+    }
+
+    console.log('')
+  })
+
 // ─── clauditor share ─────────────────────────────────────────────
 
 program
