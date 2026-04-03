@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.13.1...v1.13.2) (2026-04-03)
+
+
+### Bug Fixes
+
+* re-block every 2x waste increase, fix false context warning on Opus ([33bbb23](https://github.com/IyadhKhalfallah/clauditor/commit/33bbb23a2da209e52b77bae8f8fd88960230c545))
+* update checker was suggesting downgrades — use semver comparison ([e44446c](https://github.com/IyadhKhalfallah/clauditor/commit/e44446cf51b2ecd14fef88aab3b83f6f34a921b6))
+
 ## [1.13.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.13.0...v1.13.1) (2026-04-03)
 
 
