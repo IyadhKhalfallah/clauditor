@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.13.0...v1.13.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* realistic rotation cost in calibration (30 turns, not 5) ([ba7a562](https://github.com/IyadhKhalfallah/clauditor/commit/ba7a562dede56e7afa408442dbab0102758af79f))
+
 ## [1.13.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.12.1...v1.13.0) (2026-04-03)
 
 
