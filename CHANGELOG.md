@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.14.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.13.2...v1.14.0) (2026-04-03)
+
+
+### Features
+
+* add quota report command and brief panel in dashboard ([5c2efd4](https://github.com/IyadhKhalfallah/clauditor/commit/5c2efd4c65a63d99ba583932f4b0dbe3a65997da))
+* add quota report command and brief panel in dashboard ([0ff1a19](https://github.com/IyadhKhalfallah/clauditor/commit/0ff1a1974451985595718cf6e900968cb169115f))
+
+
+### Bug Fixes
+
+* improve block message to be user-friendly instead of Claude-dire… ([6b70db9](https://github.com/IyadhKhalfallah/clauditor/commit/6b70db9addc3c7c0c2a55fe80b3ad5ab945c0da6))
+* improve block message to be user-friendly instead of Claude-directed ([babb5c8](https://github.com/IyadhKhalfallah/clauditor/commit/babb5c8162ddfba4950fc00dd93b49b604533698))
+
 ## [1.13.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.13.1...v1.13.2) (2026-04-03)
 
 
