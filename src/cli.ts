@@ -521,6 +521,72 @@ program
     console.log('')
   })
 
+// ─── clauditor report ────────────────────────────────────────────
+
+program
+  .command('report')
+  .description('Show quota usage report — see where your tokens went')
+  .option('-d, --days <n>', 'Number of days to look back', '7')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { computeQuotaBrief } = await import('./features/quota-report.js')
+    const days = parseInt(options.days, 10) || 7
+    const brief = computeQuotaBrief(days)
+
+    if (options.json) {
+      console.log(JSON.stringify(brief, null, 2))
+      return
+    }
+
+    if (brief.totalSessions === 0) {
+      console.log('No sessions found in the last ' + days + ' days.')
+      return
+    }
+
+    console.log('')
+    console.log(`  Quota Report — last ${days} days`)
+    console.log('  ' + '─'.repeat(58))
+    console.log('')
+    console.log('  TURNS  BASE   NOW   WASTE  TOKENS')
+    console.log('  ' + '─'.repeat(58))
+
+    for (const s of brief.sessions) {
+      const barLen = Math.min(25, Math.round(s.wasteFactor))
+      const bar = '█'.repeat(barLen)
+      const color = s.wasteFactor >= 5 ? '\x1b[31m' : s.wasteFactor >= 3 ? '\x1b[33m' : '\x1b[32m'
+      const reset = '\x1b[0m'
+
+      console.log(
+        `  ${String(s.turns).padStart(5)}  ` +
+        `${(s.baselineK + 'k').padStart(4)}  ` +
+        `${(s.currentK + 'k').padStart(4)}  ` +
+        `${color}${(s.wasteFactor + 'x').padStart(5)}${reset}  ` +
+        `${(Math.round(s.totalTokens / 1e6) + 'M').padStart(5)}  ` +
+        `${color}${bar}${reset}`
+      )
+    }
+
+    console.log('  ' + '─'.repeat(58))
+    console.log('')
+    console.log(`  ${brief.totalSessions} sessions · ${(brief.totalTokens / 1e6).toFixed(0)}M tokens total`)
+    if (brief.sessionsOver5x > 0) {
+      console.log(`  \x1b[31m${brief.sessionsOver5x} sessions burned 5x+ more quota than necessary\x1b[0m`)
+    }
+    if (brief.sessionsOver3x > 0 && brief.sessionsOver3x > brief.sessionsOver5x) {
+      console.log(`  \x1b[33m${brief.sessionsOver3x - brief.sessionsOver5x} more sessions used 3-5x quota\x1b[0m`)
+    }
+
+    if (brief.worstSession && brief.worstSession.wasteFactor >= 3) {
+      const w = brief.worstSession
+      console.log('')
+      console.log(`  Worst: ${w.label} (${w.turns} turns)`)
+      console.log(`  Started at ${w.baselineK}k/turn, ended at ${w.currentK}k/turn (${w.wasteFactor}x waste)`)
+      console.log(`  With rotation, this session would have used ~${Math.round(w.turns * w.baselineK * 2 / 1000)}M tokens instead of ${Math.round(w.totalTokens / 1e6)}M`)
+    }
+
+    console.log('')
+  })
+
 // ─── clauditor sessions ──────────────────────────────────────────
 
 program

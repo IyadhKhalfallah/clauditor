@@ -4,6 +4,7 @@ import type { SessionState } from '../types.js'
 import { SessionStore } from '../daemon/store.js'
 import { Dashboard } from './dashboard.js'
 import { readActivity, type ActivityEvent } from '../features/activity-log.js'
+import { computeQuotaBrief, type QuotaBrief } from '../features/quota-report.js'
 
 interface AppProps {
   store: SessionStore
@@ -43,6 +44,7 @@ export function App({ store, projectPath }: AppProps) {
   const { exit } = useApp()
   const [sessions, setSessions] = useState<SessionState[]>([])
   const [activity, setActivity] = useState<ActivityEvent[]>([])
+  const [brief, setBrief] = useState<QuotaBrief | null>(null)
 
   useInput((input, key) => {
     if (input === 'q' || (key.ctrl && input === 'c')) {
@@ -72,6 +74,16 @@ export function App({ store, projectPath }: AppProps) {
     return () => clearInterval(interval)
   }, [])
 
+  // Compute quota brief on mount and every 60s
+  useEffect(() => {
+    const load = () => {
+      try { setBrief(computeQuotaBrief(7)) } catch {}
+    }
+    load()
+    const interval = setInterval(load, 60_000)
+    return () => clearInterval(interval)
+  }, [])
+
   // Show the most recent main session (not subagent)
   const mainSessions = sessions.filter((s) => !s.sessionId.startsWith('agent-'))
   const activeSession = mainSessions[0] || sessions[0]
@@ -90,6 +102,27 @@ export function App({ store, projectPath }: AppProps) {
         </Text>
         <Text dimColor>  {recentMainCount} sessions + {recentSubCount} subagents (last 12h)</Text>
       </Box>
+
+      {/* Quota brief — the "wow" panel */}
+      {brief && brief.totalSessions >= 3 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold dimColor>LAST 7 DAYS</Text>
+          <Text>
+            {brief.totalSessions} sessions · {brief.sessionsOver5x > 0 ? (
+              <Text color="red" bold>{brief.sessionsOver5x} burned 5x+ quota</Text>
+            ) : brief.sessionsOver3x > 0 ? (
+              <Text color="yellow">{brief.sessionsOver3x} used 3x+ quota</Text>
+            ) : (
+              <Text color="green">all sessions efficient</Text>
+            )}
+          </Text>
+          {brief.worstSession && brief.worstSession.wasteFactor >= 3 && (
+            <Text dimColor>
+              Worst: {brief.worstSession.label} ({brief.worstSession.turns} turns, {brief.worstSession.wasteFactor}x waste — {brief.worstSession.baselineK}k→{brief.worstSession.currentK}k/turn)
+            </Text>
+          )}
+        </Box>
+      )}
 
       {sessions.length === 0 ? (
         <Box>
