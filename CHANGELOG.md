@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.18.2...v1.19.0) (2026-04-04)
+
+
+### Features
+
+* capture Claude's own session summary via PostCompact hook ([#54](https://github.com/IyadhKhalfallah/clauditor/issues/54)) ([45ec3a9](https://github.com/IyadhKhalfallah/clauditor/commit/45ec3a9ee778c37668d87356f97725ecbae75306))
+
 ## [1.18.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.18.1...v1.18.2) (2026-04-04)
 
 
