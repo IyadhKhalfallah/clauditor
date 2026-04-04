@@ -55,17 +55,39 @@ async function buildSessionStartContext(
       )
     }
 
-    // Inject last session state if available
-    const { readLastSessionState } = await import('../features/session-state.js')
-    const lastState = readLastSessionState()
-    if (lastState) {
+    // Inject session handoff(s) if available
+    const { readRecentHandoffs } = await import('../features/session-state.js')
+    const handoffs = readRecentHandoffs(cwd || null)
+
+    if (handoffs.length === 1) {
+      // Single recent handoff — inject it directly
       parts.push(
         `[clauditor — previous session context]:\n` +
-        `The previous session was rotated by clauditor because it was too large. Here's what was saved:\n\n` +
-        lastState + `\n` +
+        `A previous session in this project was saved by clauditor. Here's what was captured:\n\n` +
+        handoffs[0].content + `\n` +
         `IMPORTANT: Tell the user "I have context from your previous session" and briefly summarize what you see ` +
         `(branch, what was being worked on, where it left off). Then ask if they want to continue from there. ` +
         `Do NOT start working silently — acknowledge the handoff first.`
+      )
+    } else if (handoffs.length > 1) {
+      // Multiple recent handoffs — present choice
+      const summaries = handoffs.slice(0, 5).map((h, i) => {
+        const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
+        const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+        // Extract a one-line description from the content
+        const firstLine = h.content.split('\n').find(l =>
+          l.startsWith('- **Branch:**') || l.startsWith('- **Project:**') || l.includes('## Original Task') || l.includes('## Where We Left Off')
+        ) || h.content.split('\n').slice(0, 3).join(' ').slice(0, 100)
+        return `  ${i + 1}. (${timeStr}${h.isPostCompact ? ', rich summary' : ''}) ${firstLine.slice(0, 150)}`
+      }).join('\n')
+
+      parts.push(
+        `[clauditor — ${handoffs.length} recent sessions found for this project]:\n` +
+        `Multiple sessions were saved in the last 24 hours:\n` +
+        summaries + `\n\n` +
+        `IMPORTANT: Tell the user "I found ${handoffs.length} recent session handoffs for this project" ` +
+        `and list them briefly. Ask which one they want to continue, or if they're starting something new. ` +
+        `Do NOT pick one silently.`
       )
     }
 
