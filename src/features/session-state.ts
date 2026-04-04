@@ -145,6 +145,68 @@ export interface HandoffFile {
 }
 
 /**
+ * Extract a human-readable one-line description from a handoff file.
+ * Tries multiple strategies depending on the content format.
+ */
+export function extractHandoffDescription(handoff: HandoffFile): string {
+  const lines = handoff.content.split('\n')
+
+  // PostCompact: look for first meaningful line after <analysis> or after the header
+  if (handoff.isPostCompact) {
+    for (const line of lines) {
+      const trimmed = line.trim()
+      // Skip headers, empty lines, blockquotes, and tags
+      if (!trimmed) continue
+      if (trimmed.startsWith('#')) continue
+      if (trimmed.startsWith('>')) continue
+      if (trimmed.startsWith('<')) continue
+      // Found a meaningful line — extract key info
+      // Often starts with "1." or "- " or "Let me" or "User asked"
+      const clean = trimmed.replace(/^\d+\.\s*\*\*[^*]+\*\*:?\s*/, '').replace(/^\*\*[^*]+\*\*:?\s*/, '')
+      if (clean.length > 10) return clean.slice(0, 100)
+    }
+  }
+
+  // Mechanical: build from branch + original task or where we left off
+  const branch = lines.find(l => l.startsWith('- **Branch:**'))?.replace('- **Branch:** ', '') || null
+
+  // Look for "## Where We Left Off" content
+  const woIdx = lines.findIndex(l => l.startsWith('## Where We Left Off'))
+  if (woIdx >= 0 && lines[woIdx + 1]?.trim()) {
+    const leftOff = lines[woIdx + 1].trim().slice(0, 80)
+    if (leftOff.length > 10 && !leftOff.startsWith('<') && !leftOff.startsWith('[Request')) {
+      return branch ? `${branch} — ${leftOff}` : leftOff
+    }
+  }
+
+  // Look for "## Original Task" content
+  const taskIdx = lines.findIndex(l => l.startsWith('## Original Task'))
+  if (taskIdx >= 0 && lines[taskIdx + 1]?.trim()) {
+    const task = lines[taskIdx + 1].trim().slice(0, 80)
+    if (task.length > 10 && !task.startsWith('<') && !task.startsWith('[Request')) {
+      return branch ? `${branch} — ${task}` : task
+    }
+  }
+
+  // Look for recent user messages
+  const msgIdx = lines.findIndex(l => l.startsWith('## Recent User Messages'))
+  if (msgIdx >= 0) {
+    for (let i = msgIdx + 1; i < lines.length && i < msgIdx + 4; i++) {
+      const msg = lines[i]?.replace(/^>\s*/, '').trim()
+      if (msg && msg.length > 10 && !msg.startsWith('<') && !msg.startsWith('[Request')) {
+        return branch ? `${branch} — ${msg.slice(0, 80)}` : msg.slice(0, 80)
+      }
+    }
+  }
+
+  // Fallback: branch + session size
+  const sizeLine = lines.find(l => l.startsWith('- **Session size:**'))?.replace('- **Session size:** ', '')
+  if (branch) return sizeLine ? `${branch} (${sizeLine})` : branch
+
+  return handoff.isPostCompact ? 'Claude-generated summary' : 'Session snapshot'
+}
+
+/**
  * Read recent handoff files for a given cwd (last 24 hours).
  * Returns them sorted by timestamp, most recent first.
  */

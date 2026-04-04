@@ -56,7 +56,7 @@ async function buildSessionStartContext(
     }
 
     // Inject session handoff(s) if available
-    const { readRecentHandoffs } = await import('../features/session-state.js')
+    const { readRecentHandoffs, extractHandoffDescription } = await import('../features/session-state.js')
     const handoffs = readRecentHandoffs(cwd || null)
 
     if (handoffs.length === 1) {
@@ -79,22 +79,7 @@ async function buildSessionStartContext(
       const options = handoffs.slice(0, 5).map((h, i) => {
         const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
         const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
-        // Extract a meaningful one-line description
-        const lines = h.content.split('\n')
-        const branchLine = lines.find(l => l.startsWith('- **Branch:**'))
-        const taskLine = lines.find(l => l.startsWith('## Original Task'))
-        const whereLeftOff = lines.find(l => l.startsWith('## Where We Left Off'))
-
-        let description = ''
-        if (branchLine) description += branchLine.replace('- **Branch:** ', '') + ' — '
-        if (taskLine) {
-          const taskIdx = lines.indexOf(taskLine)
-          if (taskIdx >= 0 && lines[taskIdx + 1]) description += lines[taskIdx + 1].slice(0, 80)
-        } else if (whereLeftOff) {
-          const woIdx = lines.indexOf(whereLeftOff)
-          if (woIdx >= 0 && lines[woIdx + 1]) description += lines[woIdx + 1].slice(0, 80)
-        }
-        if (!description) description = h.isPostCompact ? 'Rich session summary' : 'Session snapshot'
+        const description = extractHandoffDescription(h)
 
         return `${i + 1}. (${timeStr}) ${description}`
       }).join('\n')
