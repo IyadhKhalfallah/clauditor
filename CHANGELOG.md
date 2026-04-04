@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.1...v1.22.2) (2026-04-04)
+
+
+### Bug Fixes
+
+* extract meaningful descriptions from handoff files ([#65](https://github.com/IyadhKhalfallah/clauditor/issues/65)) ([6437d95](https://github.com/IyadhKhalfallah/clauditor/commit/6437d95a1816566c29303217c7665de4a52f245b))
+
 ## [1.22.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.0...v1.22.1) (2026-04-04)
 
 
