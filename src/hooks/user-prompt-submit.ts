@@ -253,6 +253,14 @@ function isContinuePrompt(prompt: string): boolean {
  * If the user says "continue" and there are recent handoffs, block with the handoff context.
  * This is a hard stop — the user sees the context and must press Enter to proceed.
  */
+function shortenPath(filePath: string): string {
+  const home = homedir()
+  if (filePath.startsWith(home)) {
+    return '~' + filePath.slice(home.length)
+  }
+  return filePath
+}
+
 function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: string; reason: string } | null {
   const prompt = hookInput.prompt || ''
   if (!isContinuePrompt(prompt)) return null
@@ -264,6 +272,8 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
     const h = handoffs[0]
     const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
     const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+    const desc = extractHandoffDescription(h)
+    const shortPath = shortenPath(h.path)
 
     return {
       decision: 'block',
@@ -271,19 +281,24 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
         `\n╔══════════════════════════════════════════════════════════════╗\n` +
         `║  clauditor: Previous session found (saved ${timeStr})        ║\n` +
         `╚══════════════════════════════════════════════════════════════╝\n\n` +
-        h.content.slice(0, 3000) + `\n\n` +
-        `Press Enter to continue with this context, or type a different prompt to start fresh.`,
+        `  ${desc}\n\n` +
+        `To continue, copy and paste this:\n\n` +
+        `  read ${shortPath} and continue where I left off\n\n` +
+        `Or type something else to start fresh.`,
     }
   }
 
-  // Multiple handoffs — present choice
-  const options = handoffs.slice(0, 5).map((h, i) => {
+  // Multiple handoffs — present choice with copyable prompts
+  const choices = handoffs.slice(0, 5).map((h, i) => {
     const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
     const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
-    const description = extractHandoffDescription(h)
+    const desc = extractHandoffDescription(h)
+    const shortPath = shortenPath(h.path)
 
-    return `  ${i + 1}. (${timeStr}) ${description}`
-  }).join('\n')
+    return `  ${i + 1}. (${timeStr}) ${desc}\n     → read ${shortPath} and continue where I left off`
+  })
+
+  const lines = choices.join('\n\n')
 
   return {
     decision: 'block',
@@ -291,8 +306,8 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
       `\n╔══════════════════════════════════════════════════════════════╗\n` +
       `║  clauditor: ${handoffs.length} recent sessions found                       ║\n` +
       `╚══════════════════════════════════════════════════════════════╝\n\n` +
-      options + `\n\n` +
-      `Type the number (1, 2, ...) to continue that session, or type a different prompt to start fresh.`,
+      lines + `\n\n` +
+      `Copy one of the → lines above, or type something else to start fresh.`,
   }
 }
 
