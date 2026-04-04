@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.20.0...v1.21.0) (2026-04-04)
+
+
+### Features
+
+* per-session handoff storage with multi-session choice ([#58](https://github.com/IyadhKhalfallah/clauditor/issues/58)) ([6795ada](https://github.com/IyadhKhalfallah/clauditor/commit/6795adad80ba5157a7174cf6481cfab43361fff3))
+
 ## [1.20.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.19.0...v1.20.0) (2026-04-04)
 
 
