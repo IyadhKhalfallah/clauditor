@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.0...v1.22.1) (2026-04-04)
+
+
+### Bug Fixes
+
+* use exit code 2 for continue-prompt block (works in VS Code) ([#63](https://github.com/IyadhKhalfallah/clauditor/issues/63)) ([c9b919f](https://github.com/IyadhKhalfallah/clauditor/commit/c9b919fe93351cc0bd24e2c0962947b02583ba58))
+
 ## [1.22.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.21.0...v1.22.0) (2026-04-04)
 
 
