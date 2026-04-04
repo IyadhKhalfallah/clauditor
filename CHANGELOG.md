@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.18.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.18.1...v1.18.2) (2026-04-04)
+
+
+### Bug Fixes
+
+* make Claude explicitly acknowledge session handoff on start ([#52](https://github.com/IyadhKhalfallah/clauditor/issues/52)) ([e680463](https://github.com/IyadhKhalfallah/clauditor/commit/e680463a78ee45042f802e47dbadba08a0613200))
+* persist hook state to disk, fix race conditions, deduplicate shared code ([#51](https://github.com/IyadhKhalfallah/clauditor/issues/51)) ([05f25b2](https://github.com/IyadhKhalfallah/clauditor/commit/05f25b28ac451835f0d0bdbf80aaf014976970a8))
+
 ## [1.18.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.18.0...v1.18.1) (2026-04-04)
 
 
