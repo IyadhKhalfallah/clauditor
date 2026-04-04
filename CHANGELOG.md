@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.2...v1.22.3) (2026-04-04)
+
+
+### Bug Fixes
+
+* show copyable prompts with shortened file paths in continue block ([#67](https://github.com/IyadhKhalfallah/clauditor/issues/67)) ([f023706](https://github.com/IyadhKhalfallah/clauditor/commit/f023706b334ac04c8436987d8931e9c17c954651))
+
 ## [1.22.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.1...v1.22.2) (2026-04-04)
 
 
