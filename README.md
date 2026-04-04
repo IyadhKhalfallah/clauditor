@@ -167,16 +167,48 @@ Sessions from last 7 days (70 total):
 
 | Command | Description |
 |---|---|
+| `clauditor` | Show quota report (default) |
 | `clauditor install` | Register hooks into Claude Code (one-time) |
 | `clauditor uninstall` | Remove hooks |
 | `clauditor watch` | Live dashboard showing waste factor |
+| `clauditor report` | Quota usage report with waste bars |
+| `clauditor share` | Copy-pasteable summary for social media |
+| `clauditor time` | Token usage by hour of day (peak vs off-peak) |
 | `clauditor sessions` | See where your tokens went |
 | `clauditor status` | Quick health check (no TUI) |
 | `clauditor impact` | Lifetime stats |
 | `clauditor activity` | Recent actions log |
 | `clauditor stats` | Historical usage analysis |
 | `clauditor doctor` | Scan for cache bugs |
+| `clauditor calibrate` | Auto-calibrate rotation threshold |
 | `clauditor suggest-skill` | Find repeating workflows |
+
+## Audit-only mode (no hooks)
+
+Don't want clauditor to block or modify your sessions? Skip `clauditor install` and use it as a read-only analytics tool:
+
+```bash
+npm install -g @iyadhk/clauditor
+clauditor report      # see waste across all sessions
+clauditor time        # peak vs off-peak token analysis
+clauditor sessions    # per-session breakdown
+clauditor doctor      # scan for cache bugs
+clauditor share       # copy-pasteable summary
+```
+
+These commands read your session JSONL files directly. No hooks registered, no session modifications, no side effects.
+
+## Works alongside other tools
+
+clauditor operates at the **session boundary** layer — it monitors waste and rotates sessions. Other tools work at different layers and are fully compatible:
+
+| Tool | Layer | What it does | Conflicts? |
+|---|---|---|---|
+| [Headroom](https://github.com/chopratejas/headroom) | API proxy | Compresses tool output tokens (~34% savings per turn) | No — works at HTTP level |
+| [MemStack](https://github.com/cwinvestments/memstack) | Persistent memory | SQLite + vector DB for cross-session knowledge | No — uses skills + rules |
+| [Claude Workspace Optimizer](https://oakenai.tech/tools/claude-workspace-optimizer) | Static workspace | Audits CLAUDE.md and memory files for bloat | No — runs before sessions |
+
+You can run all of them together. clauditor handles when to rotate; the others optimize what happens within a session.
 
 ## Configuration
 
@@ -206,19 +238,36 @@ Created automatically on `clauditor install`. Edit to customize.
 
 ## How it saves context
 
-When rotation triggers, clauditor saves to `~/.clauditor/last-session.md`:
+When rotation triggers, clauditor extracts rich context from the session transcript and saves to `~/.clauditor/last-session.md`:
 
 ```markdown
 # Last Session (saved by clauditor)
 
 - **Branch:** feat/variable-agent
 - **Project:** /Users/alice/projects/api-service
-- **Session size:** 889 turns, 395k tokens/turn
-- **Waste factor:** 16x
-- **Files modified:** FileAgent.cs, ServiceCollectionExtensions.cs, +13 more
+- **Session size:** 108 turns, 91k tokens/turn
+- **Waste factor:** 5x
+- **Files modified:** VariableAgentEvaluator.cs, DateTimeTools.cs, AIActionExecutor.cs
+- **Files read:** Program.cs, appsettings.json, VariableAgent.cs
+
+## Original Task
+Add a new evaluation mode to the VariableAgentEvaluator that supports generate.csv format
+
+## Commits Made
+- feat: add generation dataset support to VariableAgentEvaluator
+- fix: handle regex matching for multi-format expected outputs
+
+## Key Commands & Results
+- dotnet test --filter VariableAgent
+- → Passed! - Failed: 0, Passed: 91
+
+## Where We Left Off
+Next steps:
+1. Building the model-agnostic tool-use loop in MultiLLMClient
+2. Migrating VariableAgentRunner to use it
 ```
 
-On the next `SessionStart`, this is injected into Claude's context. Claude reads it and picks up where you left off. No CLAUDE.md modification, no git noise, no extra tokens per turn.
+On the next `SessionStart`, this is injected into Claude's context. Claude reads it and picks up where you left off — including the plan from the previous session. No CLAUDE.md modification, no git noise, no extra tokens per turn.
 
 ## Technical details
 
@@ -265,7 +314,7 @@ After 200 turns, the history alone can be 200k+ tokens. A fresh session resets t
 git clone https://github.com/IyadhKhalfallah/clauditor.git
 cd clauditor
 npm install
-npm test        # 48 tests
+npm test        # 68 tests
 npm run build
 npm link        # makes `clauditor` available globally
 ```
