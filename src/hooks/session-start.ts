@@ -61,33 +61,52 @@ async function buildSessionStartContext(
 
     if (handoffs.length === 1) {
       // Single recent handoff — inject it directly
+      // Frame as something Claude MUST relay before doing anything
+      const h = handoffs[0]
+      const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
+      const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+
       parts.push(
-        `[clauditor — previous session context]:\n` +
-        `A previous session in this project was saved by clauditor. Here's what was captured:\n\n` +
-        handoffs[0].content + `\n` +
-        `IMPORTANT: Tell the user "I have context from your previous session" and briefly summarize what you see ` +
-        `(branch, what was being worked on, where it left off). Then ask if they want to continue from there. ` +
-        `Do NOT start working silently — acknowledge the handoff first.`
+        `⚠️ BEFORE doing ANYTHING else, you MUST show this message to the user EXACTLY:\n\n` +
+        `"clauditor: I have context from your previous session (saved ${timeStr}). ` +
+        `I can see what you were working on. Want me to continue from there, or are you starting something new?"\n\n` +
+        `Wait for the user to respond before taking any action.\n\n` +
+        `Here is the saved context for reference:\n\n` +
+        h.content
       )
     } else if (handoffs.length > 1) {
-      // Multiple recent handoffs — present choice
-      const summaries = handoffs.slice(0, 5).map((h, i) => {
+      // Multiple recent handoffs — present numbered choice
+      const options = handoffs.slice(0, 5).map((h, i) => {
         const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
         const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
-        // Extract a one-line description from the content
-        const firstLine = h.content.split('\n').find(l =>
-          l.startsWith('- **Branch:**') || l.startsWith('- **Project:**') || l.includes('## Original Task') || l.includes('## Where We Left Off')
-        ) || h.content.split('\n').slice(0, 3).join(' ').slice(0, 100)
-        return `  ${i + 1}. (${timeStr}${h.isPostCompact ? ', rich summary' : ''}) ${firstLine.slice(0, 150)}`
+        // Extract a meaningful one-line description
+        const lines = h.content.split('\n')
+        const branchLine = lines.find(l => l.startsWith('- **Branch:**'))
+        const taskLine = lines.find(l => l.startsWith('## Original Task'))
+        const whereLeftOff = lines.find(l => l.startsWith('## Where We Left Off'))
+
+        let description = ''
+        if (branchLine) description += branchLine.replace('- **Branch:** ', '') + ' — '
+        if (taskLine) {
+          const taskIdx = lines.indexOf(taskLine)
+          if (taskIdx >= 0 && lines[taskIdx + 1]) description += lines[taskIdx + 1].slice(0, 80)
+        } else if (whereLeftOff) {
+          const woIdx = lines.indexOf(whereLeftOff)
+          if (woIdx >= 0 && lines[woIdx + 1]) description += lines[woIdx + 1].slice(0, 80)
+        }
+        if (!description) description = h.isPostCompact ? 'Rich session summary' : 'Session snapshot'
+
+        return `${i + 1}. (${timeStr}) ${description}`
       }).join('\n')
 
       parts.push(
-        `[clauditor — ${handoffs.length} recent sessions found for this project]:\n` +
-        `Multiple sessions were saved in the last 24 hours:\n` +
-        summaries + `\n\n` +
-        `IMPORTANT: Tell the user "I found ${handoffs.length} recent session handoffs for this project" ` +
-        `and list them briefly. Ask which one they want to continue, or if they're starting something new. ` +
-        `Do NOT pick one silently.`
+        `⚠️ BEFORE doing ANYTHING else, you MUST show this message to the user EXACTLY:\n\n` +
+        `"clauditor: I found ${handoffs.length} recent sessions for this project:\n\n` +
+        options + `\n\n` +
+        `Which one would you like to continue, or are you starting something new?"\n\n` +
+        `Wait for the user to choose before taking any action. Do NOT pick one yourself.\n\n` +
+        `Full context for each session follows:\n\n` +
+        handoffs.slice(0, 5).map((h, i) => `--- Session ${i + 1} ---\n${h.content}`).join('\n\n')
       )
     }
 
