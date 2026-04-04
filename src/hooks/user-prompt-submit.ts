@@ -1,10 +1,11 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { saveSessionState as saveSState, extractSessionStateFromTranscript } from '../features/session-state.js'
 import { readConfig } from '../config.js'
 import { loadCalibration } from '../features/calibration.js'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { logActivity } from '../features/activity-log.js'
+import { readStdin, readJsonFile, writeJsonFileAtomic, findTranscriptPathSync } from './shared.js'
 
 /**
  * UserPromptSubmit hook — fires BEFORE Claude processes the user's prompt.
@@ -47,10 +48,7 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
   }
 
   // Check if already blocked this session (only block once)
-  let blocked: Record<string, boolean> = {}
-  try {
-    blocked = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
-  } catch {}
+  const blocked = readJsonFile<Record<string, boolean>>(BLOCK_NUDGE_FILE, {})
 
   // Skip if already blocked by either UserPromptSubmit or PostToolUse
   if (blocked[hookInput.session_id] || blocked[`post-${hookInput.session_id}`]) {
@@ -84,10 +82,7 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
 
     // BLOCK — save context and tell the user
     blocked[sessionId] = true
-    try {
-      mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-      writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blocked))
-    } catch {}
+    try { writeJsonFileAtomic(BLOCK_NUDGE_FILE, blocked) } catch {}
 
     // Save rich session state to ~/.clauditor/last-session.md
     // Use transcript extraction for full context (commits, commands, user messages)
@@ -214,31 +209,7 @@ function analyzeSession(transcriptPath: string): SessionAnalysis | null {
 
 
 
-function findTranscriptPathSync(sessionId: string): string | null {
-  const projectsDir = resolve(homedir(), '.claude/projects')
-  try {
-    const dirs = readdirSync(projectsDir, { withFileTypes: true })
-    for (const dir of dirs) {
-      if (!dir.isDirectory()) continue
-      const candidate = resolve(projectsDir, dir.name, `${sessionId}.jsonl`)
-      try {
-        readFileSync(candidate, { flag: 'r' })
-        return candidate
-      } catch {}
-    }
-  } catch {}
-  return null
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk) => (data += chunk))
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', reject)
-  })
-}
+// findTranscriptPathSync and readStdin imported from ./shared.js
 
 handleUserPromptSubmitHook().catch((err) => {
   process.stderr.write(`clauditor user-prompt-submit hook error: ${err}\n`)

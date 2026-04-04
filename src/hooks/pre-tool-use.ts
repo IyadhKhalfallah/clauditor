@@ -1,4 +1,5 @@
 import type { PreToolUseHookInput, HookDecision } from '../types.js'
+import { readStdin, outputDecision } from './shared.js'
 
 /**
  * PreToolUse hook handler — placeholder for future pre-execution checks.
@@ -19,20 +20,6 @@ export async function handlePreToolUseHook(): Promise<void> {
 function processPreToolUse(_input: PreToolUseHookInput): HookDecision {
   // Pass through — no blocking logic yet
   return {}
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk) => (data += chunk))
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', reject)
-  })
-}
-
-function outputDecision(decision: HookDecision): void {
-  process.stdout.write(JSON.stringify(decision))
 }
 
 // Run if invoked directly
