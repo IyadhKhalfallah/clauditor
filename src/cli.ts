@@ -94,7 +94,9 @@ program
         lastTurn.usage.cache_creation_input_tokens +
         lastTurn.usage.cache_read_input_tokens
       : 0
-    const contextPct = Math.round((contextSize / 200_000) * 100)
+    const isOpus = s.model?.includes('opus') ?? false
+    const contextLimit = isOpus ? 1_000_000 : 200_000
+    const contextPct = Math.round((contextSize / contextLimit) * 100)
     const pricing = s.model ? getPricingForModel(s.model) : undefined
     const cost = estimateCost(s.totalUsage, pricing)
 
@@ -123,7 +125,7 @@ program
     console.log(`\n  ${s.label}`)
     console.log(`  ${s.model?.replace('claude-', '').split('-2')[0] || 'unknown'} · ${s.turns.length} turns\n`)
     console.log(`  Cache:    ${cacheColor}${(s.cacheHealth.lastCacheRatio * 100).toFixed(0)}% ${s.cacheHealth.status}${reset}`)
-    console.log(`  Context:  ${ctxColor}${contextPct}%${reset} (${(contextSize / 1000).toFixed(0)}k / 200k)`)
+    console.log(`  Context:  ${ctxColor}${contextPct}%${reset} (${(contextSize / 1000).toFixed(0)}k / ${(contextLimit / 1000).toFixed(0)}k)`)
 
     if (s.loopState.loopDetected) {
       console.log(`  Loop:     \x1b[31m${s.loopState.loopPattern} (${s.loopState.consecutiveIdenticalTurns}x)\x1b[0m`)

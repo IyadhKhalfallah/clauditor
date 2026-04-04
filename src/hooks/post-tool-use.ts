@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
@@ -13,6 +12,7 @@ import { logActivity } from '../features/activity-log.js'
 import { saveSessionState, extractSessionStateFromTranscript, findTranscriptPathSync as findTranscriptSync } from '../features/session-state.js'
 import { readConfig } from '../config.js'
 import { loadCalibration } from '../features/calibration.js'
+import { readStdin, outputDecision, writeJsonFileAtomic, readJsonFile } from './shared.js'
 
 /**
  * PostToolUse hook handler.
@@ -115,15 +115,22 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   return { additionalContext: parts.join('\n\n') }
 }
 
-// Track when we last checked health per session to avoid checking on every tool call
-const lastHealthCheck = new Map<string, number>()
+// Track when we last checked health per session to avoid checking on every tool call.
+// Persisted to disk because each hook invocation is a separate process.
+const HEALTH_CHECK_FILE = resolve(homedir(), '.clauditor', 'health-check-ts.json')
 const HEALTH_CHECK_INTERVAL_MS = 30_000 // check every 30 seconds — fast enough to catch 20-min burnouts
+
+function writeHealthCheckTimestamp(sessionId: string, now: number): void {
+  const data = readJsonFile<Record<string, number>>(HEALTH_CHECK_FILE, {})
+  data[sessionId] = now
+  try { writeJsonFileAtomic(HEALTH_CHECK_FILE, data) } catch {}
+}
 
 async function checkSessionHealth(sessionId: string): Promise<HookDecision | null> {
   const now = Date.now()
-  const lastCheck = lastHealthCheck.get(sessionId) ?? 0
+  const lastCheck = readJsonFile<Record<string, number>>(HEALTH_CHECK_FILE, {})[sessionId] ?? 0
   if (now - lastCheck < HEALTH_CHECK_INTERVAL_MS) return null
-  lastHealthCheck.set(sessionId, now)
+  writeHealthCheckTimestamp(sessionId, now)
 
   try {
     const transcriptPath = await findTranscriptPath(sessionId)
@@ -369,12 +376,7 @@ const NUDGE_FILE = resolve(homedir(), '.clauditor', 'skill-nudge.json')
 
 function checkSkillNudge(sessionId: string, toolName: string): string | null {
   // Read and update nudge state synchronously (fast, small file)
-  let state: Record<string, { count: number; tools: string[]; nudged: boolean }> = {}
-  try {
-    state = JSON.parse(readFileSync(NUDGE_FILE, 'utf-8'))
-  } catch {
-    // File doesn't exist yet
-  }
+  const state = readJsonFile<Record<string, { count: number; tools: string[]; nudged: boolean }>>(NUDGE_FILE, {})
 
   if (!state[sessionId]) {
     state[sessionId] = { count: 0, tools: [], nudged: false }
@@ -388,7 +390,7 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
 
   // Already nudged this session
   if (session.nudged) {
-    try { writeFileSync(NUDGE_FILE, JSON.stringify(state)); } catch {}
+    try { writeJsonFileAtomic(NUDGE_FILE, state) } catch {}
     return null
   }
 
@@ -396,10 +398,7 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
   // 20+ tool calls AND at least 3 different tools (not just Read/Read/Read)
   if (session.count >= NUDGE_THRESHOLD && session.tools.length >= 3) {
     session.nudged = true
-    try {
-      mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-      writeFileSync(NUDGE_FILE, JSON.stringify(state))
-    } catch {}
+    try { writeJsonFileAtomic(NUDGE_FILE, state) } catch {}
 
     return (
       `[clauditor]: This has been a productive session (${session.count}+ actions across ${session.tools.length} tools). ` +
@@ -409,10 +408,7 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
     )
   }
 
-  try {
-    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-    writeFileSync(NUDGE_FILE, JSON.stringify(state))
-  } catch {}
+  try { writeJsonFileAtomic(NUDGE_FILE, state) } catch {}
   return null
 }
 
@@ -446,20 +442,14 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
 
   // Re-block at every 2x increase: if we blocked at 5x, block again at 7x, 9x, etc.
   // Tracks the waste level when last blocked, not just true/false.
-  let blockedAt: Record<string, number> = {}
-  try {
-    blockedAt = JSON.parse(readFileSync(BLOCK_NUDGE_FILE, 'utf-8'))
-  } catch {}
+  const blockedAt = readJsonFile<Record<string, number>>(BLOCK_NUDGE_FILE, {})
   const key = `post-${sessionId}`
   const lastBlockedWaste = blockedAt[key] || 0
   if (lastBlockedWaste > 0 && wasteFactor < lastBlockedWaste + 2) return null
 
   // Mark as blocked at this waste level
   blockedAt[key] = wasteFactor
-  try {
-    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-    writeFileSync(BLOCK_NUDGE_FILE, JSON.stringify(blockedAt))
-  } catch {}
+  try { writeJsonFileAtomic(BLOCK_NUDGE_FILE, blockedAt) } catch {}
 
   // Save session state to ~/.clauditor/last-session.md (not CLAUDE.md)
   const transcriptPath = findTranscriptSync(sessionId)
@@ -490,72 +480,6 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
 
 const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.json')
 
-/**
- * Session rotation via additionalContext (legacy, kept for nudge file writes).
- */
-const ROTATION_NUDGE_FILE = resolve(homedir(), '.clauditor', 'rotation-nudge.json')
-
-function checkSessionRotation(sessionId: string, turns: TurnMetrics[]): string | null {
-  const config = readConfig()
-  if (!config.rotation.enabled) return null
-  const cal = loadCalibration()
-  if (turns.length < cal.minTurns) return null
-
-  // Check if already nudged this session
-  let nudged: Record<string, boolean> = {}
-  try {
-    nudged = JSON.parse(readFileSync(ROTATION_NUDGE_FILE, 'utf-8'))
-  } catch {}
-  if (nudged[sessionId]) return null
-
-  // Calculate average tokens per turn over last 10 turns
-  const recentTurns = turns.slice(-10)
-  const avgTokens = recentTurns.reduce((sum, t) => {
-    return sum + t.usage.input_tokens + t.usage.output_tokens +
-      t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
-  }, 0) / recentTurns.length
-
-  // Compute baseline from first 5 turns
-  const baselineTokens = turns.slice(0, 5).reduce((sum, t) =>
-    sum + t.usage.input_tokens + t.usage.output_tokens +
-    t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens, 0
-  ) / Math.min(5, turns.length)
-
-  // Use calibrated waste threshold
-  const wasteFactorLegacy = baselineTokens > 0 ? avgTokens / baselineTokens : 1
-  if (wasteFactorLegacy < cal.wasteThreshold) return null
-
-  // Mark as nudged
-  nudged[sessionId] = true
-  try {
-    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-    writeFileSync(ROTATION_NUDGE_FILE, JSON.stringify(nudged))
-  } catch {}
-
-  const freshEstimate = Math.round(avgTokens / 10 / 1000)
-  const currentK = Math.round(avgTokens / 1000)
-  const ratio = Math.round(avgTokens / (freshEstimate * 1000))
-
-  // Save to ~/.clauditor/last-session.md (not CLAUDE.md)
-  const transcriptPath2 = findTranscriptSync(sessionId)
-  if (transcriptPath2) {
-    const stateData = extractSessionStateFromTranscript(sessionId, transcriptPath2)
-    if (stateData) saveSessionState(stateData)
-  }
-
-  logActivity({
-    type: 'context_warning',
-    session: sessionId.slice(0, 8),
-    message: `Session rotation triggered — ${currentK}k tokens/turn avg, ${ratio}x waste`,
-  }).catch(() => {})
-
-  return (
-    `[clauditor — SESSION ROTATION]: This session is using ${currentK}k tokens per turn. ` +
-    `A fresh session would use ~${freshEstimate}k per turn — ${ratio}x less quota.\n\n` +
-    `Tell the user: "This session has grown large (${turns.length} turns, ${currentK}k tokens/turn). ` +
-    `Starting a fresh session will use ${ratio}x less of your quota. Run \`claude\` to start fresh."`
-  )
-}
 
 
 const ERROR_PATTERNS = [
@@ -606,17 +530,18 @@ function detectBashError(sessionId: string, output: string): string | null {
  * Track file edit counts per session. When the same file is edited 5+ times,
  * it's likely Claude is thrashing — iterating on code instead of stepping
  * back to understand the design problem.
+ *
+ * Persisted to disk because each hook invocation is a separate process.
  */
-const fileEditCounts = new Map<string, Map<string, number>>()
+const EDIT_COUNTS_FILE = resolve(homedir(), '.clauditor', 'edit-counts.json')
 const EDIT_THRASH_THRESHOLD = 5
 
 function trackFileEdits(sessionId: string, filePath: string): string | null {
-  if (!fileEditCounts.has(sessionId)) {
-    fileEditCounts.set(sessionId, new Map())
-  }
-  const counts = fileEditCounts.get(sessionId)!
-  const count = (counts.get(filePath) || 0) + 1
-  counts.set(filePath, count)
+  const allCounts = readJsonFile<Record<string, Record<string, number>>>(EDIT_COUNTS_FILE, {})
+  if (!allCounts[sessionId]) allCounts[sessionId] = {}
+  const count = (allCounts[sessionId][filePath] || 0) + 1
+  allCounts[sessionId][filePath] = count
+  try { writeJsonFileAtomic(EDIT_COUNTS_FILE, allCounts) } catch {}
 
   if (count === EDIT_THRASH_THRESHOLD) {
     const fileName = filePath.split(/[/\\]/).pop() || filePath
@@ -643,20 +568,6 @@ function trackFileEdits(sessionId: string, filePath: string): string | null {
 function formatSize(chars: number): string {
   if (chars < 1000) return `${chars} chars`
   return `${(chars / 1000).toFixed(1)}k chars`
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk) => (data += chunk))
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', reject)
-  })
-}
-
-function outputDecision(decision: HookDecision): void {
-  process.stdout.write(JSON.stringify(decision))
 }
 
 // Run if invoked directly

@@ -1,9 +1,6 @@
-import { readFileSync, readdirSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { resolve } from 'node:path'
-import type { HookDecision } from '../types.js'
 import { logActivity } from '../features/activity-log.js'
-import { saveSessionState, extractSessionStateFromTranscript, findTranscriptPathSync } from '../features/session-state.js'
+import { saveSessionState, extractSessionStateFromTranscript } from '../features/session-state.js'
+import { readStdin, outputDecision, findTranscriptPathSync } from './shared.js'
 
 /**
  * PreCompact hook — fires right before Claude Code compacts the context.
@@ -46,20 +43,6 @@ export async function handlePreCompactHook(): Promise<void> {
   }
 
   outputDecision({})
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk) => (data += chunk))
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', reject)
-  })
-}
-
-function outputDecision(decision: HookDecision): void {
-  process.stdout.write(JSON.stringify(decision))
 }
 
 handlePreCompactHook().catch((err) => {

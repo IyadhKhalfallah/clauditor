@@ -6,6 +6,7 @@ import { parseJsonlFile, extractTurns, extractModel } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
 import { hasResumeBoundary, detectResumeAnomaly } from '../features/resume-detector.js'
 import { logActivity } from '../features/activity-log.js'
+import { readStdin, outputDecision, pruneStaleStateFiles } from './shared.js'
 
 /**
  * SessionStart hook handler.
@@ -27,6 +28,9 @@ export async function handleSessionStartHook(): Promise<void> {
     outputDecision({})
     return
   }
+
+  // Prune stale state files — lightweight, runs once per session start
+  try { pruneStaleStateFiles() } catch {}
 
   const context = await buildSessionStartContext(hookInput.cwd)
   outputDecision(context)
@@ -182,20 +186,6 @@ async function checkRecentSessions(projectsDir: string): Promise<string[]> {
 
   // Deduplicate and limit
   return [...new Set(issues)].slice(0, 3)
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk) => (data += chunk))
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', reject)
-  })
-}
-
-function outputDecision(decision: HookDecision): void {
-  process.stdout.write(JSON.stringify(decision))
 }
 
 // Run if invoked directly

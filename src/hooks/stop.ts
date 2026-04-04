@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import type { StopHookInput, HookDecision, SessionRecord, AssistantRecord } from '../types.js'
 import { createHash } from 'node:crypto'
 import { logActivity } from '../features/activity-log.js'
+import { readStdin, outputDecision } from './shared.js'
 
 /**
  * Stop hook handler — detects compaction loops and blocks further execution.
@@ -100,20 +101,6 @@ function analyzeForLoop(input: StopHookInput): HookDecision {
 function hashValue(value: unknown): string {
   const str = typeof value === 'string' ? value : JSON.stringify(value ?? '')
   return createHash('sha256').update(str).digest('hex').slice(0, 16)
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    process.stdin.setEncoding('utf-8')
-    process.stdin.on('data', (chunk) => (data += chunk))
-    process.stdin.on('end', () => resolve(data))
-    process.stdin.on('error', reject)
-  })
-}
-
-function outputDecision(decision: HookDecision): void {
-  process.stdout.write(JSON.stringify(decision))
 }
 
 // Run if invoked directly
