@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.18.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.17.0...v1.18.0) (2026-04-04)
+
+
+### Features
+
+* add `clauditor time` — analyze token usage by hour of day ([c45babf](https://github.com/IyadhKhalfallah/clauditor/commit/c45babfcf292bf877eae858f8c26d3828d683d34))
+* add cache hit ratio to share output ([92de206](https://github.com/IyadhKhalfallah/clauditor/commit/92de206b0d41e81329ea6a5e1f918d571eaa5a92))
+* add cache hit ratio to share output and session reports ([dfccb3f](https://github.com/IyadhKhalfallah/clauditor/commit/dfccb3fbe8bd2341749cab70edab3cec4b03c190))
+* add clauditor time — peak vs off-peak token analysis ([66832d0](https://github.com/IyadhKhalfallah/clauditor/commit/66832d0d9755b07fd59699b68a6b53e54f1e3e16))
+* append ready-to-post tweet to GitHub releases ([e5389ae](https://github.com/IyadhKhalfallah/clauditor/commit/e5389aeadd2ebf7a5c9c55c65cbb803e5965784e))
+* append tweet draft to GitHub releases ([03475d3](https://github.com/IyadhKhalfallah/clauditor/commit/03475d3777e867f1f1de2f193a82fbd8ee43957c))
+* capture last assistant message in session handoff ([f67723e](https://github.com/IyadhKhalfallah/clauditor/commit/f67723e3afde5640772d9ae0e49f63eb755429dc))
+* detect buggy Claude Code versions (2.1.69-2.1.89) ([b10b092](https://github.com/IyadhKhalfallah/clauditor/commit/b10b092e7004aea44bd032ab4d23fa3115b31fcf))
+* rich context summary on session rotation ([4ba9d70](https://github.com/IyadhKhalfallah/clauditor/commit/4ba9d704455bdd2d20c5299fe010b3e6dce4825c))
+* rich context summary on session rotation ([8aa544f](https://github.com/IyadhKhalfallah/clauditor/commit/8aa544fea0e0c0be4f2ac989f9a922fc26d2215c))
+* version-aware cache bug warnings ([86bb08a](https://github.com/IyadhKhalfallah/clauditor/commit/86bb08a6746a39d5992540a45479de02fda3688a))
+
 ## [1.17.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.16.0...v1.17.0) (2026-04-03)
 
 
