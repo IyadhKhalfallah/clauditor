@@ -141,10 +141,10 @@ export function extractSessionStateFromTranscript(
       try {
         const r = JSON.parse(line)
 
-        // Extract user messages
-        if (r.type === 'user') {
+        // Extract user messages (skip meta/system messages)
+        if (r.type === 'user' && !r.isMeta) {
           const msg = extractUserMessage(r)
-          if (msg) {
+          if (msg && !msg.startsWith('<')) {
             userMessages.push(msg)
             if (!originalTask) originalTask = msg
           }
@@ -191,12 +191,24 @@ export function extractSessionStateFromTranscript(
 
               // Git commits — various formats
               if (cmd.includes('git') && cmd.includes('commit')) {
-                const match = cmd.match(/-m\s+["']([^"']+)["']/) ||
-                  cmd.match(/-m\s+"?\$\(cat <<[^)]+\n\s*([^\n]+)/) ||
-                  cmd.match(/commit\s+-m\s+"([^"]+)"/) ||
-                  cmd.match(/commit\s+-m\s+'([^']+)'/)
-                if (match) {
-                  gitCommits.push(match[1].trim().slice(0, 120))
+                let commitMsg: string | null = null
+
+                // HEREDOC format first (most common in Claude Code): -m "$(cat <<'EOF'\nmessage\nEOF\n)"
+                if (cmd.includes('<<')) {
+                  const heredocMatch = cmd.match(/<<['"]?EOF['"]?\)?\s*\n\s*(.+)/)
+                  if (heredocMatch) commitMsg = heredocMatch[1].trim()
+                }
+
+                // Standard formats: -m "message" or -m 'message'
+                if (!commitMsg) {
+                  const match = cmd.match(/-m\s+["']([^"'\n]+)["']/) ||
+                    cmd.match(/commit\s+-m\s+"([^"\n]+)"/) ||
+                    cmd.match(/commit\s+-m\s+'([^'\n]+)'/)
+                  if (match) commitMsg = match[1].trim()
+                }
+
+                if (commitMsg) {
+                  gitCommits.push(commitMsg.slice(0, 120))
                 }
               }
 

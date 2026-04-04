@@ -190,6 +190,46 @@ describe('extractSessionStateFromTranscript', () => {
     expect(result!.originalTask!.length).toBeLessThanOrEqual(303) // 300 + '...'
   })
 
+  it('skips meta messages for original task', () => {
+    const lines = [
+      // Meta message (isMeta: true) — should be skipped
+      makeUserRecord('meta', '<local-command-caveat>Do not respond</local-command-caveat>', { isMeta: true }),
+      // Real user message
+      makeUserRecord('1', 'Build a REST API'),
+      ...Array.from({ length: 6 }, (_, i) => makeAssistantRecord(`a${i}`, { text: `response ${i}` })),
+    ]
+    const result = extractSessionStateFromTranscript('s1', writeSession(lines))
+    expect(result).not.toBeNull()
+    expect(result!.originalTask).toBe('Build a REST API')
+    expect(result!.originalTask).not.toContain('local-command-caveat')
+  })
+
+  it('skips messages starting with XML tags', () => {
+    const lines = [
+      makeUserRecord('1', '<command-name>/clear</command-name>'),
+      makeUserRecord('2', 'The real task starts here'),
+      ...Array.from({ length: 6 }, (_, i) => makeAssistantRecord(`a${i}`, { text: `response ${i}` })),
+    ]
+    const result = extractSessionStateFromTranscript('s1', writeSession(lines))
+    expect(result).not.toBeNull()
+    expect(result!.originalTask).toBe('The real task starts here')
+  })
+
+  it('extracts git commits from HEREDOC format', () => {
+    const heredocCmd = "git commit -m \"$(cat <<'EOF'\nfeat: add new feature\n\nhttps://claude.ai/code/session_123\nEOF\n)\""
+    const lines = [
+      makeUserRecord('1', 'Do work'),
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeAssistantRecord(`a${i}`, {
+          toolCalls: [{ name: 'Bash', input: { command: heredocCmd } }],
+        })
+      ),
+    ]
+    const result = extractSessionStateFromTranscript('s1', writeSession(lines))
+    expect(result).not.toBeNull()
+    expect(result!.gitCommits).toContain('feat: add new feature')
+  })
+
   it('truncates last assistant message to 500 chars', () => {
     const longMsg = 'y'.repeat(1000)
     const lines = [
