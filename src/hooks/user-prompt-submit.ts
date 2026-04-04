@@ -41,9 +41,12 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
   }
 
   // Check if this is a "continue" prompt — if so, block with handoff context
+  // Uses exit code 2 + stderr (same as PostToolUse rotation) which works in both CLI and VS Code
   const continueBlock = checkContinuePrompt(hookInput)
   if (continueBlock) {
-    process.stdout.write(JSON.stringify(continueBlock))
+    process.stderr.write(continueBlock.reason)
+    process.stdout.write('{}')
+    process.exit(2)
     return
   }
 
