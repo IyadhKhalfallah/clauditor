@@ -57,9 +57,11 @@ async function buildSessionStartContext(
     if (lastState) {
       parts.push(
         `[clauditor — previous session context]:\n` +
-        `The previous session was rotated because it was too large. Here's what was saved:\n\n` +
+        `The previous session was rotated by clauditor because it was too large. Here's what was saved:\n\n` +
         lastState + `\n` +
-        `Use this context to pick up where the user left off.`
+        `IMPORTANT: Tell the user "I have context from your previous session" and briefly summarize what you see ` +
+        `(branch, what was being worked on, where it left off). Then ask if they want to continue from there. ` +
+        `Do NOT start working silently — acknowledge the handoff first.`
       )
     }
 
