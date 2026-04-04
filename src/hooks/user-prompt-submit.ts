@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { saveSessionState as saveSState, extractSessionStateFromTranscript } from '../features/session-state.js'
+import { saveSessionState as saveSState, extractSessionStateFromTranscript, readRecentHandoffs } from '../features/session-state.js'
 import { readConfig } from '../config.js'
 import { loadCalibration } from '../features/calibration.js'
 import { homedir } from 'node:os'
@@ -37,6 +37,13 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
     hookInput = JSON.parse(input)
   } catch {
     process.stdout.write('{}')
+    return
+  }
+
+  // Check if this is a "continue" prompt — if so, block with handoff context
+  const continueBlock = checkContinuePrompt(hookInput)
+  if (continueBlock) {
+    process.stdout.write(JSON.stringify(continueBlock))
     return
   }
 
@@ -210,6 +217,95 @@ function analyzeSession(transcriptPath: string): SessionAnalysis | null {
 
 
 // findTranscriptPathSync and readStdin imported from ./shared.js
+
+/**
+ * Regex to detect "continue where I left off" style prompts.
+ * Matches variations like:
+ *   "continue", "continue where I left off", "pick up where we left off",
+ *   "resume", "resume previous session", "keep going", "carry on",
+ *   "what were we working on", "where did we leave off"
+ */
+const CONTINUE_PATTERNS = [
+  /^\s*continue\s*$/i,
+  /^\s*continue\s+(where|from|with)/i,
+  /^\s*pick\s+up/i,
+  /^\s*resume\s*$/i,
+  /^\s*resume\s+(work|session|previous|where|from)/i,
+  /^\s*keep\s+going/i,
+  /^\s*carry\s+on/i,
+  /^\s*where\s+(did|were)\s+(we|i|you)\s+(leave|left)/i,
+  /^\s*what\s+(were|was)\s+(we|i|you)\s+(working|doing)/i,
+  /^\s*let'?s?\s+continue/i,
+  /^\s*continue\s+here/i,
+  /^\s*start\s+from\s+where/i,
+  /^\s*pick\s+it\s+up/i,
+  /^\s*back\s+to\s+(work|where)/i,
+]
+
+function isContinuePrompt(prompt: string): boolean {
+  return CONTINUE_PATTERNS.some(p => p.test(prompt.trim()))
+}
+
+/**
+ * If the user says "continue" and there are recent handoffs, block with the handoff context.
+ * This is a hard stop — the user sees the context and must press Enter to proceed.
+ */
+function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: string; reason: string } | null {
+  const prompt = hookInput.prompt || ''
+  if (!isContinuePrompt(prompt)) return null
+
+  const handoffs = readRecentHandoffs(hookInput.cwd || null)
+  if (handoffs.length === 0) return null
+
+  if (handoffs.length === 1) {
+    const h = handoffs[0]
+    const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
+    const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+
+    return {
+      decision: 'block',
+      reason:
+        `\n╔══════════════════════════════════════════════════════════════╗\n` +
+        `║  clauditor: Previous session found (saved ${timeStr})        ║\n` +
+        `╚══════════════════════════════════════════════════════════════╝\n\n` +
+        h.content.slice(0, 3000) + `\n\n` +
+        `Press Enter to continue with this context, or type a different prompt to start fresh.`,
+    }
+  }
+
+  // Multiple handoffs — present choice
+  const options = handoffs.slice(0, 5).map((h, i) => {
+    const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
+    const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+    const lines = h.content.split('\n')
+    const branchLine = lines.find(l => l.startsWith('- **Branch:**'))
+    const taskLine = lines.find(l => l.startsWith('## Original Task'))
+    const whereLeftOff = lines.find(l => l.startsWith('## Where We Left Off'))
+
+    let description = ''
+    if (branchLine) description += branchLine.replace('- **Branch:** ', '') + ' — '
+    if (taskLine) {
+      const taskIdx = lines.indexOf(taskLine)
+      if (taskIdx >= 0 && lines[taskIdx + 1]) description += lines[taskIdx + 1].slice(0, 80)
+    } else if (whereLeftOff) {
+      const woIdx = lines.indexOf(whereLeftOff)
+      if (woIdx >= 0 && lines[woIdx + 1]) description += lines[woIdx + 1].slice(0, 80)
+    }
+    if (!description) description = h.isPostCompact ? 'Rich session summary' : 'Session snapshot'
+
+    return `  ${i + 1}. (${timeStr}) ${description}`
+  }).join('\n')
+
+  return {
+    decision: 'block',
+    reason:
+      `\n╔══════════════════════════════════════════════════════════════╗\n` +
+      `║  clauditor: ${handoffs.length} recent sessions found                       ║\n` +
+      `╚══════════════════════════════════════════════════════════════╝\n\n` +
+      options + `\n\n` +
+      `Type the number (1, 2, ...) to continue that session, or type a different prompt to start fresh.`,
+  }
+}
 
 handleUserPromptSubmitHook().catch((err) => {
   process.stderr.write(`clauditor user-prompt-submit hook error: ${err}\n`)
