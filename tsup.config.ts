@@ -21,6 +21,7 @@ export default defineConfig([
       'hooks/post-tool-use': 'src/hooks/post-tool-use.ts',
       'hooks/pre-tool-use': 'src/hooks/pre-tool-use.ts',
       'hooks/pre-compact': 'src/hooks/pre-compact.ts',
+      'hooks/post-compact': 'src/hooks/post-compact.ts',
       'hooks/user-prompt-submit': 'src/hooks/user-prompt-submit.ts',
       'hooks/session-start': 'src/hooks/session-start.ts',
     },
