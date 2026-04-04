@@ -980,6 +980,13 @@ hookCmd
   })
 
 hookCmd
+  .command('post-compact')
+  .description('PostCompact hook handler — captures Claude\'s own session summary')
+  .action(async () => {
+    await import('./hooks/post-compact.js')
+  })
+
+hookCmd
   .command('session-start')
   .description('SessionStart hook handler')
   .action(async () => {

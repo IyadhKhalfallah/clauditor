@@ -38,6 +38,10 @@ const CLAUDITOR_HOOKS: Record<string, HookEventConfig> = {
     matcher: '',
     hooks: [{ type: 'command', command: getHookCommand('pre-compact') }],
   },
+  PostCompact: {
+    matcher: '',
+    hooks: [{ type: 'command', command: getHookCommand('post-compact') }],
+  },
   SessionStart: {
     matcher: '',
     hooks: [{ type: 'command', command: getHookCommand('session-start') }],

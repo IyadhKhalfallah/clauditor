@@ -470,11 +470,12 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
       `clauditor: This session is using ${wasteFactor}x more quota per turn than when it started ` +
       `(${Math.round(baseline / 1000)}k → ${Math.round(current / 1000)}k tokens/turn). ` +
       `Session progress has been saved to ~/.clauditor/last-session.md.\n` +
-      `IMPORTANT — Tell the user:\n` +
-      `1. This session is burning ${wasteFactor}x more quota than necessary\n` +
-      `2. Their progress has been saved and won't be lost\n` +
-      `3. Run \`claude\` to start a fresh session — clauditor will automatically inject the saved context\n` +
-      `4. The fresh session will use ~${Math.round(baseline / 1000)}k tokens/turn instead of ${Math.round(current / 1000)}k`,
+      `IMPORTANT — Before stopping, do these two things:\n` +
+      `1. Tell the user: this session is burning ${wasteFactor}x more quota than necessary. ` +
+      `Their progress is saved. Run \`claude\` to start fresh at ~${Math.round(baseline / 1000)}k tokens/turn instead of ${Math.round(current / 1000)}k.\n` +
+      `2. Write a brief summary of where you are: current task, what's done, what's next, any blockers. ` +
+      `Include this in your response so the user can paste it into the next session if needed.\n` +
+      `3. In the new session, tell the user to just say "continue where I left off" — clauditor will inject the saved context automatically.`,
   }
 }
 
