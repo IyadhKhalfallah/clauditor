@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -24,7 +26,7 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -40,3 +42,47 @@ jobs:
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Append tweet draft to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.release-please.outputs.version }}"
+          TAG="${{ needs.release-please.outputs.tag_name }}"
+
+          # Get current release body
+          BODY=$(gh release view "$TAG" --json body -q .body)
+
+          # Extract changelog bullets for context
+          HIGHLIGHTS=$(echo "$BODY" | grep -E '^\* ' | head -5 | sed 's/^\* /  - /' | sed 's/ \[.*$//')
+
+          # Append tweet draft
+          read -r -d '' TWEET_SECTION << 'SECTION_EOF' || true
+
+          ---
+
+          ### 📋 Tweet draft (edit before posting)
+
+          **What changed in this release:**
+          SECTION_EOF
+
+          TWEET_SECTION="${TWEET_SECTION}
+          ${HIGHLIGHTS}
+
+          **Draft tweet (copy, edit, post):**
+
+          \`\`\`
+          New clauditor update (v${VERSION}):
+
+          [Write 1-2 sentences about the biggest change and why it matters to users]
+
+          Run \`clauditor report\` to see your own data.
+
+          npm install -g @iyadhk/clauditor
+          \`\`\`
+
+          > **Tips:** Lead with the user problem, not the feature. Use your own data as proof. Keep it under 280 chars."
+
+          # Append to release
+          UPDATED="${BODY}${TWEET_SECTION}"
+          gh release edit "$TAG" --notes "$UPDATED"
