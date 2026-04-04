@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
@@ -452,27 +451,11 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
   blockedAt[key] = wasteFactor
   try { writeJsonFileAtomic(BLOCK_NUDGE_FILE, blockedAt) } catch {}
 
-  // Save session state to ~/.clauditor/last-session.md (not CLAUDE.md)
-  // Only save if the file doesn't already have a recent, richer summary
-  // (e.g., from PostCompact's compact_summary which is Claude-generated)
-  const lastSessionPath = resolve(homedir(), '.clauditor', 'last-session.md')
-  // Don't overwrite if PostCompact already saved Claude's own summary
-  let shouldSaveMechanical = true
-  try {
-    const existingContent = readFileSync(lastSessionPath, 'utf-8')
-    if (existingContent.includes('PostCompact')) {
-      shouldSaveMechanical = false
-    }
-  } catch {
-    // File doesn't exist — save mechanical version
-  }
-
-  if (shouldSaveMechanical) {
-    const transcriptPath = findTranscriptSync(sessionId)
-    if (transcriptPath) {
-      const stateData = extractSessionStateFromTranscript(sessionId, transcriptPath)
-      if (stateData) saveSessionState(stateData)
-    }
+  // Save session state — each save creates a separate file now (no overwrite risk)
+  const transcriptPath = findTranscriptSync(sessionId)
+  if (transcriptPath) {
+    const stateData = extractSessionStateFromTranscript(sessionId, transcriptPath)
+    if (stateData) saveSessionState(stateData)
   }
 
   logActivity({
