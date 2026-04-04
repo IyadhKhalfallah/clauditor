@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.22.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.21.0...v1.22.0) (2026-04-04)
+
+
+### Features
+
+* block on "continue" prompts with handoff context ([#62](https://github.com/IyadhKhalfallah/clauditor/issues/62)) ([5a46d09](https://github.com/IyadhKhalfallah/clauditor/commit/5a46d095376efab717d98286700768332cd467a9))
+
+
+### Bug Fixes
+
+* make session handoff acknowledgment impossible to ignore ([#60](https://github.com/IyadhKhalfallah/clauditor/issues/60)) ([87721c5](https://github.com/IyadhKhalfallah/clauditor/commit/87721c592d87e6d95727ea4e3a52dbe12871ca96))
+
 ## [1.21.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.20.0...v1.21.0) (2026-04-04)
 
 
