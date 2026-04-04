@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.18.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.18.0...v1.18.1) (2026-04-04)
+
+
+### Bug Fixes
+
+* skip meta messages in handoff, fix HEREDOC commit parsing ([0fab65c](https://github.com/IyadhKhalfallah/clauditor/commit/0fab65c9c2a560e6cb7c4adb6d000987575532bc))
+* skip meta messages in handoff, fix HEREDOC commit parsing ([0f40770](https://github.com/IyadhKhalfallah/clauditor/commit/0f407700f8047a5295d24766b23abbb0a888473f))
+
 ## [1.18.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.17.0...v1.18.0) (2026-04-04)
 
 
