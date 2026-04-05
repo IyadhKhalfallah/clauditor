@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import type { PreToolUseHookInput, HookDecision } from '../types.js'
 import { readStdin, outputDecision } from './shared.js'
 import { findKnownError } from '../features/error-index.js'
+import { resolveHubContext } from '../hub/client.js'
 
 // Rate limit: only inject once per unique base command per session.
 // Persisted to disk because each hook invocation is a separate process.
@@ -25,43 +26,80 @@ function markInjected(key: string): void {
 /**
  * PreToolUse hook handler — injects error prevention knowledge.
  *
- * Before Claude runs a Bash command, checks the error index for known failures.
- * If this command has failed before on this project, injects the known fix
- * as additional context. Non-blocking — Claude decides whether to use it.
+ * Before Claude runs a Bash command, checks:
+ * 1. Local error index for known failures (free, offline)
+ * 2. Hub error index for team-wide knowledge (if configured)
+ *
+ * Non-blocking — Claude decides whether to use the injected context.
  */
 export async function handlePreToolUseHook(): Promise<void> {
   const input = await readStdin()
   const hookInput = JSON.parse(input) as PreToolUseHookInput
 
-  const decision = processPreToolUse(hookInput)
+  const decision = await processPreToolUse(hookInput)
   outputDecision(decision)
 }
 
-function processPreToolUse(input: PreToolUseHookInput): HookDecision {
+async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecision> {
   // Only check Bash commands
   if (input.tool_name !== 'Bash') return {}
 
   const command = input.tool_input?.command as string
-  if (!command || !input.cwd) return {}
+  if (!command) return {}
 
-  // Rate limit: one injection per unique command per session (persisted to disk)
-  const key = `${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
-  const injected = readInjected()
-  if (injected[key]) return {}
+  const parts: string[] = []
 
-  const knownError = findKnownError(input.cwd, command)
-  if (!knownError) return {}
-
-  markInjected(key)
-
-  let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
-  context += `Last error: ${knownError.error.slice(0, 150)}`
-
-  if (knownError.fix) {
-    context += `\nKnown fix: \`${knownError.fix.slice(0, 100)}\``
+  // 1. Local error index check (free, offline, instant)
+  if (input.cwd) {
+    const key = `${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
+    const injected = readInjected()
+    if (!injected[key]) {
+      const knownError = findKnownError(input.cwd, command)
+      if (knownError) {
+        markInjected(key)
+        let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
+        context += `Last error: ${knownError.error.slice(0, 150)}`
+        if (knownError.fix) {
+          context += `\nKnown fix: \`${knownError.fix.slice(0, 100)}\``
+        }
+        parts.push(context)
+      }
+    }
   }
 
-  return { additionalContext: context }
+  // 2. Hub error check (team-wide, if configured for this project)
+  const hub = resolveHubContext(input.cwd || undefined)
+  if (hub) {
+    try {
+      const { checkCommand } = await import('../hub/client.js')
+
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 2000)
+
+      try {
+        const result = await checkCommand(hub.projectHash, command, hub.config)
+        clearTimeout(timeout)
+
+        if (result.known_error && result.known_error.confidence >= 0.5) {
+          const err = result.known_error
+          parts.push(
+            `[clauditor hub]: This command is known to fail across your team.\n` +
+            `Error: ${err.error_message}\n` +
+            `Known fix: ${err.fix_command}\n` +
+            `Confidence: ${(err.confidence * 100).toFixed(0)}% (based on team reports)`
+          )
+        }
+      } finally {
+        clearTimeout(timeout)
+      }
+    } catch (err) {
+      // Hub unavailable — local check is enough
+      process.stderr.write(`clauditor: hub error check failed (non-critical): ${err}\n`)
+    }
+  }
+
+  if (parts.length === 0) return {}
+  return { additionalContext: parts.join('\n\n') }
 }
 
 // Run if invoked directly

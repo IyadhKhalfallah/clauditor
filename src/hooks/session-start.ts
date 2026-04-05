@@ -103,6 +103,51 @@ async function buildSessionStartContext(
       )
     }
 
+    // Pull team brain from hub (if configured for this project)
+    try {
+      const { resolveHubContext, pullBrain } = await import('../hub/client.js')
+      const hub = resolveHubContext(cwd || undefined)
+      if (hub) {
+        const { getCachedBrain, getCachedEtag, cacheBrain } = await import('../hub/cache.js')
+
+        const cached = getCachedBrain(hub.projectHash)
+        const etag = getCachedEtag(hub.projectHash)
+
+        try {
+          const brain = await pullBrain(hub.projectHash, hub.config, etag)
+          if (brain) {
+            cacheBrain(hub.projectHash, brain)
+            const content = typeof brain.content === 'string' ? brain.content : JSON.stringify(brain.content, null, 2)
+            parts.push(
+              `[clauditor hub — team knowledge (v${brain.version}, ${brain.fragment_count} fragments)]:\n` +
+              `The following project brain was consolidated from your team's coding sessions.\n` +
+              `Use this knowledge to prevent known errors and follow established patterns.\n\n` +
+              content
+            )
+          } else if (cached) {
+            const content = typeof cached.content === 'string' ? cached.content : JSON.stringify(cached.content, null, 2)
+            parts.push(
+              `[clauditor hub — team knowledge (v${cached.version}, cached)]:\n` +
+              `The following project brain was consolidated from your team's coding sessions.\n` +
+              `Use this knowledge to prevent known errors and follow established patterns.\n\n` +
+              content
+            )
+          }
+        } catch {
+          if (cached) {
+            const content = typeof cached.content === 'string' ? cached.content : JSON.stringify(cached.content, null, 2)
+            parts.push(
+              `[clauditor hub — team knowledge (cached, offline)]:\n` +
+              content
+            )
+          }
+        }
+      }
+    } catch (err) {
+      // Hub pull is non-critical — session starts without team knowledge
+      process.stderr.write(`clauditor: hub pull failed (non-critical): ${err}\n`)
+    }
+
     // Remind Claude about CLAUDE.md context
     if (cwd) {
       const claudeMdPath = resolve(cwd, 'CLAUDE.md')
