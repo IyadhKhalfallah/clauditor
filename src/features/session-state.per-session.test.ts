@@ -152,19 +152,23 @@ describe('per-session handoff storage', () => {
     expect(handoffs[0].content).toContain('Legacy handoff')
   })
 
-  it('isolates handoffs by project (cwd)', async () => {
+  it('returns handoffs from all projects (global scan)', async () => {
     const mod = await importFresh(tempDir)
 
     mod.saveSessionState(makeBaseData({ cwd: '/home/user/project-a', originalTask: 'Project A task' }))
     mod.saveSessionState(makeBaseData({ cwd: '/home/user/project-b', originalTask: 'Project B task' }))
 
-    const handoffsA = mod.readRecentHandoffs('/home/user/project-a')
-    expect(handoffsA.length).toBe(1)
-    expect(handoffsA[0].content).toContain('Project A task')
+    // readRecentHandoffs now returns all projects regardless of cwd
+    const handoffs = mod.readRecentHandoffs()
+    expect(handoffs.length).toBe(2)
+    const contents = handoffs.map((h: { content: string }) => h.content)
+    expect(contents.some((c: string) => c.includes('Project A task'))).toBe(true)
+    expect(contents.some((c: string) => c.includes('Project B task'))).toBe(true)
 
-    const handoffsB = mod.readRecentHandoffs('/home/user/project-b')
-    expect(handoffsB.length).toBe(1)
-    expect(handoffsB[0].content).toContain('Project B task')
+    // Project metadata is extracted from content
+    const projects = handoffs.map((h: { project: string | null }) => h.project)
+    expect(projects).toContain('/home/user/project-a')
+    expect(projects).toContain('/home/user/project-b')
   })
 
   it('marks PostCompact files vs mechanical extraction correctly', async () => {
