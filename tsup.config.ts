@@ -13,6 +13,14 @@ export default defineConfig([
       js: '#!/usr/bin/env node',
     },
   },
+  // Postinstall — standalone, no splitting, no shebang
+  {
+    entry: { postinstall: 'src/postinstall.ts' },
+    format: ['esm'],
+    target: 'node20',
+    splitting: false,
+    sourcemap: false,
+  },
   // Library + hook entries — no shebang
   {
     entry: {
