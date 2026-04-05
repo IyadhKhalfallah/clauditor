@@ -34,7 +34,7 @@ export async function handleStopHook(): Promise<void> {
   outputDecision(decision)
 }
 
-function analyzeForLoop(input: StopHookInput): HookDecision {
+export function analyzeForLoop(input: StopHookInput): HookDecision {
   let records: SessionRecord[]
   try {
     const content = readFileSync(input.transcript_path, 'utf-8')
