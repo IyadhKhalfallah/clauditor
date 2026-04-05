@@ -884,6 +884,65 @@ function formatTimeAgo(date: Date): string {
   return `${Math.floor(seconds / 86400)}d ago`
 }
 
+// ─── clauditor knowledge ─────────────────────────────────────────
+
+program
+  .command('knowledge')
+  .description('Show accumulated project knowledge (errors, file activity)')
+  .option('-p, --project <path>', 'Project directory', process.cwd())
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { readErrorIndex } = await import('./features/error-index.js')
+    const { readFileIndex } = await import('./features/file-tracker.js')
+
+    const cwd = resolve(options.project)
+    const errors = readErrorIndex(cwd)
+    const files = readFileIndex(cwd)
+
+    if (options.json) {
+      console.log(JSON.stringify({ errors, files }, null, 2))
+      return
+    }
+
+    console.log('')
+    console.log(`  Project Knowledge — ${cwd}`)
+    console.log('  ' + '─'.repeat(58))
+
+    // Errors
+    if (errors.length > 0) {
+      console.log('')
+      console.log(`  \x1b[31mKnown Errors (${errors.length})\x1b[0m`)
+      for (const e of errors.slice(0, 10)) {
+        console.log(`  ${e.command.slice(0, 50)} — ${e.occurrences}x`)
+        console.log(`    Error: ${e.error.slice(0, 80)}`)
+        if (e.fix) console.log(`    \x1b[32mFix: ${e.fix.slice(0, 80)}\x1b[0m`)
+      }
+    } else {
+      console.log('')
+      console.log('  No errors recorded yet.')
+    }
+
+    // Files
+    const hotFiles = Object.entries(files)
+      .filter(([, f]) => f.editCount >= 3)
+      .sort(([, a], [, b]) => b.editCount - a.editCount)
+
+    if (hotFiles.length > 0) {
+      console.log('')
+      console.log(`  \x1b[33mFrequently Modified Files\x1b[0m`)
+      for (const [name, f] of hotFiles.slice(0, 15)) {
+        console.log(`  ${name.padEnd(40)} ${String(f.editCount).padStart(3)} edits  ${String(f.sessions).padStart(2)} sessions  last: ${f.lastEdited}`)
+      }
+    } else {
+      console.log('')
+      console.log('  No file activity recorded yet.')
+    }
+
+    console.log('')
+    console.log('  Knowledge accumulates automatically as you use Claude Code.')
+    console.log('')
+  })
+
 // ─── clauditor suggest-skill ─────────────────────────────────────
 
 program
