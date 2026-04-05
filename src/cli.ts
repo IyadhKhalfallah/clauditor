@@ -25,17 +25,17 @@ program
   .description('Live TUI dashboard for active sessions')
   .option('-p, --project <path>', 'Watch a specific project directory')
   .option('-a, --all', 'Watch all projects')
+  .option('--plain', 'Use plain text output instead of TUI (for incompatible terminals)')
   .action(async (options) => {
     const config = await loadConfig()
     const { startDaemon } = await import('./daemon/index.js')
-    const { render } = await import('ink')
-    const React = await import('react')
-    const { App } = await import('./tui/app.js')
 
     const projectPath = options.project ? resolve(options.project) : undefined
 
     // Clear terminal before rendering to prevent stacked frames
-    process.stdout.write('\x1B[2J\x1B[H')
+    if (!options.plain) {
+      process.stdout.write('\x1B[2J\x1B[H')
+    }
 
     const { store } = await startDaemon({
       projectsDir: config.watch.projectsDir,
@@ -43,6 +43,48 @@ program
       pollInterval: config.watch.pollInterval,
       alerts: config.alerts,
     })
+
+    if (options.plain) {
+      // Plain text fallback for terminals that don't support Ink
+      console.log('clauditor watch (plain mode) — press Ctrl+C to quit\n')
+      const print = () => {
+        const sessions = store.getAll()
+        if (sessions.length === 0) {
+          return
+        }
+        process.stdout.write('\x1Bc')
+        console.log(`── clauditor ── ${sessions.length} sessions\n`)
+        for (const s of sessions.slice(0, 10)) {
+          const turnTokens = s.turns.map(t =>
+            t.usage.input_tokens + t.usage.output_tokens +
+            t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+          )
+          const baseline = turnTokens.length >= 5
+            ? turnTokens.slice(0, 5).reduce((a, b) => a + b, 0) / 5
+            : turnTokens.length > 0 ? turnTokens.reduce((a, b) => a + b, 0) / turnTokens.length : 0
+          const current = turnTokens.length >= 5
+            ? turnTokens.slice(-5).reduce((a, b) => a + b, 0) / 5 : baseline
+          const waste = baseline > 0 ? Math.round(current / baseline) : 1
+          console.log(
+            `  ${s.label.slice(0, 40).padEnd(40)} ` +
+            `${String(s.turns.length).padStart(4)} turns  ` +
+            `${Math.round(current / 1000)}k/turn  ` +
+            `${waste}x waste  ` +
+            `cache: ${Math.round(s.cacheHealth.lastCacheRatio * 100)}%`
+          )
+        }
+        console.log('\n  Ctrl+C to quit')
+      }
+      print()
+      setInterval(print, 5000)
+      await new Promise(() => {})
+      return
+    }
+
+    // TUI mode (default)
+    const { render } = await import('ink')
+    const React = await import('react')
+    const { App } = await import('./tui/app.js')
 
     const encodedProject = projectPath
       ? projectPath.replace(/[^a-zA-Z0-9]/g, '-')
