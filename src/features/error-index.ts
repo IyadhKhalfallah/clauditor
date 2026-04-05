@@ -13,6 +13,8 @@ export interface ErrorEntry {
   occurrences: number
   firstSeen: string
   lastSeen: string
+  /** Timestamp of the most recent occurrence (ms since epoch) */
+  lastErrorMs?: number
 }
 
 /**
@@ -55,7 +57,8 @@ export function recordError(cwd: string, command: string, error: string): void {
   if (existing) {
     existing.occurrences++
     existing.lastSeen = today()
-    existing.error = truncatedError // update to most recent error text
+    existing.lastErrorMs = Date.now()
+    existing.error = truncatedError
   } else {
     errors.push({
       command: command.slice(0, 200),
@@ -64,6 +67,7 @@ export function recordError(cwd: string, command: string, error: string): void {
       occurrences: 1,
       firstSeen: today(),
       lastSeen: today(),
+      lastErrorMs: Date.now(),
     })
   }
 
@@ -74,21 +78,29 @@ export function recordError(cwd: string, command: string, error: string): void {
  * Record a fix for a recent error. Called from PostToolUse when a command
  * succeeds after a recent failure with the same binary.
  *
- * Heuristic: same binary name within 3 turns, second one succeeds.
+ * Only records if the error occurred within the last 60 seconds (proximity check).
  */
+const FIX_PROXIMITY_MS = 60_000
+
 export function recordFix(cwd: string, command: string): void {
   const errors = readErrorIndex(cwd)
   const baseCmd = extractBaseCommand(command)
+  const now = Date.now()
 
-  // Find the most recent unfixed error with the same base command
+  // Find the most recent unfixed error with the same base command, within 60s
   const unfixed = errors
-    .filter(e => extractBaseCommand(e.command) === baseCmd && !e.fix)
-    .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen))[0]
+    .filter(e =>
+      extractBaseCommand(e.command) === baseCmd &&
+      !e.fix &&
+      e.lastErrorMs &&
+      (now - e.lastErrorMs) < FIX_PROXIMITY_MS
+    )
+    .sort((a, b) => (b.lastErrorMs || 0) - (a.lastErrorMs || 0))[0]
 
   if (!unfixed) return
 
   unfixed.fix = command.slice(0, 200)
-  writeErrors(cwd, unfixed ? errors : errors)
+  writeErrors(cwd, errors)
 }
 
 /**
@@ -151,10 +163,10 @@ export function extractBaseCommand(command: string): string {
  * Check if two error messages are similar enough to be the same error.
  */
 function similarError(a: string, b: string): boolean {
-  // Simple: check if they share the same first 50 chars (same error type)
-  const prefixA = a.slice(0, 50).toLowerCase()
-  const prefixB = b.slice(0, 50).toLowerCase()
-  return prefixA === prefixB
+  // Compare first lines — distinguishes "error TS2322: Type 'string'" from "error TS2322: Type 'Date'"
+  const lineA = a.split('\n')[0].trim().toLowerCase()
+  const lineB = b.split('\n')[0].trim().toLowerCase()
+  return lineA === lineB
 }
 
 function today(): string {

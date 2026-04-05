@@ -1,9 +1,26 @@
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 import type { PreToolUseHookInput, HookDecision } from '../types.js'
 import { readStdin, outputDecision } from './shared.js'
 import { findKnownError } from '../features/error-index.js'
 
-// Rate limit: only inject once per unique base command per session
-const injectedCommands = new Set<string>()
+// Rate limit: only inject once per unique base command per session.
+// Persisted to disk because each hook invocation is a separate process.
+const RATE_LIMIT_FILE = resolve(homedir(), '.clauditor', 'pretool-injected.json')
+
+function readInjected(): Record<string, boolean> {
+  try { return JSON.parse(readFileSync(RATE_LIMIT_FILE, 'utf-8')) } catch { return {} }
+}
+
+function markInjected(key: string): void {
+  const data = readInjected()
+  data[key] = true
+  try {
+    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+    writeFileSync(RATE_LIMIT_FILE, JSON.stringify(data))
+  } catch {}
+}
 
 /**
  * PreToolUse hook handler — injects error prevention knowledge.
@@ -27,14 +44,15 @@ function processPreToolUse(input: PreToolUseHookInput): HookDecision {
   const command = input.tool_input?.command as string
   if (!command || !input.cwd) return {}
 
-  // Rate limit: one injection per unique command per session
+  // Rate limit: one injection per unique command per session (persisted to disk)
   const key = `${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
-  if (injectedCommands.has(key)) return {}
+  const injected = readInjected()
+  if (injected[key]) return {}
 
   const knownError = findKnownError(input.cwd, command)
   if (!knownError) return {}
 
-  injectedCommands.add(key)
+  markInjected(key)
 
   let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
   context += `Last error: ${knownError.error.slice(0, 150)}`

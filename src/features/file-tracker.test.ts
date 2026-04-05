@@ -28,8 +28,8 @@ describe('recordFileEdit', () => {
     const c = cwd('edit1')
     recordFileEdit(c, `${c}/src/app.ts`, 'session-1')
     const index = readFileIndex(c)
-    expect(index['app.ts'].editCount).toBe(1)
-    expect(index['app.ts'].sessions).toBe(1)
+    expect(index['src/app.ts'].editCount).toBe(1)
+    expect(index['src/app.ts'].sessions).toBe(1)
   })
 
   it('increments edit count, sessions stays at 1 for same session', () => {
@@ -38,8 +38,8 @@ describe('recordFileEdit', () => {
     recordFileEdit(c, `${c}/src/app.ts`, 'session-1')
     recordFileEdit(c, `${c}/src/app.ts`, 'session-1')
     const index = readFileIndex(c)
-    expect(index['app.ts'].editCount).toBe(3)
-    expect(index['app.ts'].sessions).toBe(1)
+    expect(index['src/app.ts'].editCount).toBe(3)
+    expect(index['src/app.ts'].sessions).toBe(1)
   })
 })
 
@@ -48,7 +48,10 @@ describe('recordFileRead', () => {
     const c = cwd('read1')
     recordFileRead(c, `${c}/config.json`, 'session-1')
     const index = readFileIndex(c)
-    expect(index['config.json'].readCount).toBe(1)
+    // fileKey uses last 2 segments — find the entry by checking keys
+    const configKey = Object.keys(index).find(k => k.endsWith('config.json'))
+    expect(configKey).toBeDefined()
+    expect(index[configKey!].readCount).toBe(1)
   })
 })
 
@@ -67,8 +70,8 @@ describe('getFileContext', () => {
       }
     }
     const index = readFileIndex(c)
-    expect(index['hot.ts'].editCount).toBe(8)
-    expect(index['hot.ts'].sessions).toBe(4)
+    expect(index['src/hot.ts'].editCount).toBe(8)
+    expect(index['src/hot.ts'].sessions).toBe(4)
 
     const ctx = getFileContext(c, `${c}/src/hot.ts`)
     expect(ctx).not.toBeNull()
@@ -88,9 +91,10 @@ describe('cleanupFileIndex', () => {
     recordFileEdit(c, `${c}/src/old.ts`, 'session-1')
 
     const index = readFileIndex(c)
+    const oldKey = Object.keys(index).find(k => k.endsWith('old.ts'))!
     const oldDate = new Date()
     oldDate.setDate(oldDate.getDate() - 91)
-    index['old.ts'].lastEdited = oldDate.toISOString().slice(0, 10)
+    index[oldKey].lastEdited = oldDate.toISOString().slice(0, 10)
 
     const encoded = c.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 100)
     const dir = resolve(tempDir, '.clauditor', 'knowledge', encoded)
@@ -98,6 +102,8 @@ describe('cleanupFileIndex', () => {
     writeFileSync(resolve(dir, 'files.json'), JSON.stringify(index))
 
     cleanupFileIndex(c)
-    expect(readFileIndex(c)['old.ts']).toBeUndefined()
+    const cleaned = readFileIndex(c)
+    const stillExists = Object.keys(cleaned).find(k => k.endsWith('old.ts'))
+    expect(stillExists).toBeUndefined()
   })
 })

@@ -52,6 +52,9 @@ export async function handlePostToolUseHook(): Promise<void> {
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
   const parts: string[] = []
 
+  // Resolve cwd — may not be provided by Claude Code in all contexts
+  const cwd = input.cwd || null
+
   // 1. Compress bash output if applicable
   if (input.tool_name === 'Bash') {
     const toolResponse = input.tool_response || ''
@@ -81,12 +84,12 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       parts.push(errorGuidance)
       // Record the error in the project knowledge index
       const cmd = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
-      if (input.cwd && cmd) {
-        try { recordError(input.cwd, cmd, toolResponse.slice(0, 200)) } catch {}
+      if (cwd && cmd) {
+        try { recordError(cwd, cmd, toolResponse.slice(0, 200)) } catch {}
       }
-    } else if (input.cwd && typeof input.tool_input?.command === 'string') {
+    } else if (cwd && typeof input.tool_input?.command === 'string') {
       // Command succeeded — check if it's a fix for a recent error
-      try { recordFix(input.cwd, input.tool_input.command) } catch {}
+      try { recordFix(cwd, input.tool_input.command) } catch {}
     }
   }
 
@@ -99,8 +102,8 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
         parts.push(editWarning)
       }
       // Track file edit in project knowledge
-      if (input.cwd) {
-        try { recordFileEdit(input.cwd, filePath, input.session_id) } catch {}
+      if (cwd) {
+        try { recordFileEdit(cwd, filePath, input.session_id) } catch {}
       }
     }
   }
@@ -108,10 +111,10 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   // 2b. Track file reads + inject context for hot files
   if (input.tool_name === 'Read') {
     const filePath = (input.tool_input?.file_path as string) || ''
-    if (filePath && input.cwd) {
-      try { recordFileRead(input.cwd, filePath, input.session_id) } catch {}
+    if (filePath && cwd) {
+      try { recordFileRead(cwd, filePath, input.session_id) } catch {}
       // Inject context for hot files (5+ edits, 3+ sessions)
-      const fileCtx = getFileContext(input.cwd, filePath)
+      const fileCtx = getFileContext(cwd, filePath)
       if (fileCtx) {
         parts.push(fileCtx)
       }
