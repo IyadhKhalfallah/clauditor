@@ -1,14 +1,28 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir, homedir } from 'node:os'
+import { tmpdir } from 'node:os'
+import { computeTimeAnalysis } from './quota-report.js'
 
 // We test computeTimeAnalysis by creating temp JSONL files
-// and pointing the function at them via mocking homedir
+// and redirecting homedir via the HOME env var (os.homedir()
+// respects the HOME environment variable on Unix systems).
+
+/**
+ * Build an ISO timestamp whose local hour is the given value.
+ * This avoids timezone-dependent failures since computeTimeAnalysis
+ * uses Date.getHours() (local time) internally.
+ */
+function localHourToISO(localHour: number, minuteOffset = 0): string {
+  const d = new Date()
+  d.setHours(localHour, minuteOffset, 0, 0)
+  return d.toISOString()
+}
 
 describe('computeTimeAnalysis', () => {
   let tempDir: string
   let projectsDir: string
+  let origHome: string | undefined
 
   function makeAssistantRecord(id: string, timestamp: string, tokens: {
     input: number; output: number; cacheRead: number; cacheCreate: number;
@@ -38,24 +52,24 @@ describe('computeTimeAnalysis', () => {
     tempDir = mkdtempSync(join(tmpdir(), 'clauditor-test-'))
     projectsDir = join(tempDir, '.claude', 'projects', '-test-project')
     mkdirSync(projectsDir, { recursive: true })
+    origHome = process.env.HOME
+    process.env.HOME = tempDir
   })
 
   afterEach(() => {
+    process.env.HOME = origHome
     rmSync(tempDir, { recursive: true, force: true })
   })
 
-  it('groups tokens by hour correctly', async () => {
-    // Create a session with turns at different hours
+  it('groups tokens by hour correctly', () => {
+    // Create a session with turns at different local hours
     const lines = [
-      makeAssistantRecord('1', '2026-04-03T09:00:00Z', { input: 1000, output: 500, cacheRead: 8000, cacheCreate: 500 }),
-      makeAssistantRecord('2', '2026-04-03T09:30:00Z', { input: 1000, output: 500, cacheRead: 9000, cacheCreate: 500 }),
-      makeAssistantRecord('3', '2026-04-03T22:00:00Z', { input: 500, output: 200, cacheRead: 4000, cacheCreate: 300 }),
+      makeAssistantRecord('1', localHourToISO(9), { input: 1000, output: 500, cacheRead: 8000, cacheCreate: 500 }),
+      makeAssistantRecord('2', localHourToISO(9, 30), { input: 1000, output: 500, cacheRead: 9000, cacheCreate: 500 }),
+      makeAssistantRecord('3', localHourToISO(22), { input: 500, output: 200, cacheRead: 4000, cacheCreate: 300 }),
     ]
     writeFileSync(join(projectsDir, 'test-session.jsonl'), lines.join('\n'))
 
-    // Import with mocked homedir
-    vi.doMock('node:os', () => ({ homedir: () => tempDir }))
-    const { computeTimeAnalysis } = await import('./quota-report.js')
     const analysis = computeTimeAnalysis(7)
 
     // Hour 9 should have 2 turns
@@ -67,21 +81,17 @@ describe('computeTimeAnalysis', () => {
     const hour22 = analysis.hourly[22]
     expect(hour22.turns).toBe(1)
     expect(hour22.totalTokens).toBe(5000)
-
-    vi.doUnmock('node:os')
   })
 
-  it('calculates cache ratio per hour', async () => {
+  it('calculates cache ratio per hour', () => {
     const lines = [
       // High cache hit
-      makeAssistantRecord('1', '2026-04-03T10:00:00Z', { input: 100, output: 50, cacheRead: 9000, cacheCreate: 100 }),
+      makeAssistantRecord('1', localHourToISO(10), { input: 100, output: 50, cacheRead: 9000, cacheCreate: 100 }),
       // Low cache hit
-      makeAssistantRecord('2', '2026-04-03T14:00:00Z', { input: 100, output: 50, cacheRead: 1000, cacheCreate: 8000 }),
+      makeAssistantRecord('2', localHourToISO(14), { input: 100, output: 50, cacheRead: 1000, cacheCreate: 8000 }),
     ]
     writeFileSync(join(projectsDir, 'test-session.jsonl'), lines.join('\n'))
 
-    vi.doMock('node:os', () => ({ homedir: () => tempDir }))
-    const { computeTimeAnalysis } = await import('./quota-report.js')
     const analysis = computeTimeAnalysis(7)
 
     // Hour 10: cache ratio = 9000 / (100 + 9000 + 100) = 97.8%
@@ -89,22 +99,16 @@ describe('computeTimeAnalysis', () => {
 
     // Hour 14: cache ratio = 1000 / (100 + 1000 + 8000) = 11%
     expect(analysis.hourly[14].avgCacheRatio).toBeLessThan(0.15)
-
-    vi.doUnmock('node:os')
   })
 
-  it('deduplicates by message ID', async () => {
+  it('deduplicates by message ID', () => {
     // Same message ID in two files — should only count once
-    const line = makeAssistantRecord('same', '2026-04-03T10:00:00Z', { input: 1000, output: 500, cacheRead: 5000, cacheCreate: 500 })
+    const line = makeAssistantRecord('same', localHourToISO(10), { input: 1000, output: 500, cacheRead: 5000, cacheCreate: 500 })
     writeFileSync(join(projectsDir, 'session-a.jsonl'), line)
     writeFileSync(join(projectsDir, 'session-b.jsonl'), line)
 
-    vi.doMock('node:os', () => ({ homedir: () => tempDir }))
-    const { computeTimeAnalysis } = await import('./quota-report.js')
     const analysis = computeTimeAnalysis(7)
 
     expect(analysis.hourly[10].turns).toBe(1) // not 2
-
-    vi.doUnmock('node:os')
   })
 })
