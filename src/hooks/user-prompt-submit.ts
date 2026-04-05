@@ -265,6 +265,19 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
   const prompt = hookInput.prompt || ''
   if (!isContinuePrompt(prompt)) return null
 
+  // Don't block if this is an existing session (has assistant turns).
+  // The user might be saying "continue here" after dismissing a rotation block,
+  // meaning "keep working in this session" — not "load a handoff."
+  if (hookInput.transcript_path) {
+    try {
+      const transcript = readFileSync(hookInput.transcript_path, 'utf-8')
+      const hasAssistantTurns = transcript.includes('"type":"assistant"')
+      if (hasAssistantTurns) return null
+    } catch {
+      // Can't read transcript — proceed with block (safe default for new sessions)
+    }
+  }
+
   const handoffs = readRecentHandoffs(hookInput.cwd || null)
   if (handoffs.length === 0) return null
 

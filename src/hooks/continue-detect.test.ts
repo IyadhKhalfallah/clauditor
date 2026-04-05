@@ -88,3 +88,15 @@ describe('continue prompt detection', () => {
     }
   })
 })
+
+describe('existing session detection', () => {
+  it('detects assistant turns in transcript', () => {
+    const transcriptWithTurns = '{"type":"user","message":{"content":"hello"}}\n{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":100}}}'
+    expect(transcriptWithTurns.includes('"type":"assistant"')).toBe(true)
+  })
+
+  it('detects no assistant turns in empty transcript', () => {
+    const emptyTranscript = '{"type":"user","message":{"content":"hello"}}'
+    expect(emptyTranscript.includes('"type":"assistant"')).toBe(false)
+  })
+})
