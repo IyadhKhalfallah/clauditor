@@ -475,7 +475,8 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
       `Their progress is saved. Run \`claude\` to start fresh at ~${Math.round(baseline / 1000)}k tokens/turn instead of ${Math.round(current / 1000)}k.\n` +
       `2. Write a brief summary of where you are: current task, what's done, what's next, any blockers. ` +
       `Include this in your response so the user can paste it into the next session if needed.\n` +
-      `3. In the new session, tell the user to just say "continue where I left off" — clauditor will inject the saved context automatically.`,
+      `3. In the new session, tell the user to just say "continue where I left off" — clauditor will inject the saved context automatically.\n` +
+      `4. Include the marker [clauditor-rotation] at the end of your response so clauditor can capture your summary.`,
   }
 }
 
