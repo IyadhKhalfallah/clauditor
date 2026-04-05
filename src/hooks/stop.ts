@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs'
 import type { StopHookInput, HookDecision, SessionRecord, AssistantRecord } from '../types.js'
 import { createHash } from 'node:crypto'
 import { logActivity } from '../features/activity-log.js'
+import { savePostCompactSummary } from '../features/session-state.js'
 import { readStdin, outputDecision } from './shared.js'
 
 /**
  * Stop hook handler — detects compaction loops and blocks further execution.
+ * Also captures Claude's handoff summary after a rotation block.
  *
  * This uses Claude Code's official Stop hook API. The hook receives session
  * context on stdin and outputs a decision to stdout.
@@ -23,6 +25,10 @@ export async function handleStopHook(): Promise<void> {
     outputDecision({})
     return
   }
+
+  // Check if Claude just wrote a rotation handoff summary
+  // (after PostToolUse blocked with exit code 2, Claude writes a summary)
+  captureRotationHandoff(hookInput)
 
   const decision = analyzeForLoop(hookInput)
   outputDecision(decision)
@@ -96,6 +102,55 @@ function analyzeForLoop(input: StopHookInput): HookDecision {
   }
 
   return {}
+}
+
+/**
+ * After a rotation block (PostToolUse exit code 2), Claude writes a handoff
+ * summary in its response. The Stop hook fires after that response, and
+ * `last_assistant_message` contains Claude's summary. If it looks like a
+ * rotation handoff, save it as a rich per-session file — replacing the
+ * sparse mechanical extraction that was saved during the block.
+ */
+function captureRotationHandoff(input: StopHookInput): void {
+  const msg = input.last_assistant_message
+  if (!msg || msg.length < 100) return
+
+  // Detect if this is a rotation handoff summary.
+  // The block message tells Claude to include [clauditor-rotation] marker.
+  // Also check for strong rotation-specific AND pairs as fallback.
+  const isRotationHandoff =
+    msg.includes('[clauditor-rotation]') ||
+    (msg.includes('burning') && msg.includes('quota')) ||
+    (msg.includes('progress') && msg.includes('saved') && msg.includes('session')) ||
+    (msg.includes('fresh session') && msg.includes('tokens/turn'))
+
+  if (!isRotationHandoff) return
+
+  // Extract cwd from transcript
+  let cwd: string | null = null
+  try {
+    const content = readFileSync(input.transcript_path, 'utf-8')
+    const lines = content.split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const r = JSON.parse(lines[i])
+        if (r.type === 'user' && r.cwd) {
+          cwd = r.cwd
+          break
+        }
+      } catch {}
+    }
+  } catch {}
+
+  try {
+    savePostCompactSummary(msg, cwd)
+
+    logActivity({
+      type: 'context_warning',
+      session: input.session_id.slice(0, 8),
+      message: `Stop hook: captured Claude's rotation handoff summary (${msg.length} chars)`,
+    }).catch(() => {})
+  } catch {}
 }
 
 function hashValue(value: unknown): string {
