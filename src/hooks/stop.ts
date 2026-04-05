@@ -150,7 +150,25 @@ function captureRotationHandoff(input: StopHookInput): void {
       session: input.session_id.slice(0, 8),
       message: `Stop hook: captured Claude's rotation handoff summary (${msg.length} chars)`,
     }).catch(() => {})
-  } catch {}
+  } catch (err) {
+    process.stderr.write(`clauditor: failed to save rotation handoff: ${err}\n`)
+  }
+
+  // Push to hub (fire-and-forget, non-blocking)
+  ;(async () => {
+    try {
+      const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
+      const hub = resolveHubContext(cwd || undefined)
+      if (!hub) return
+
+      await pushKnowledge(hub.projectHash, hub.config.developerHash, [{
+        type: 'summary',
+        content: { summary: msg.slice(0, 2000), session_id: input.session_id, timestamp: new Date().toISOString() },
+      }], hub.config, hub.remoteUrl)
+    } catch (err) {
+      process.stderr.write(`clauditor: hub summary push failed: ${err}\n`)
+    }
+  })()
 }
 
 function hashValue(value: unknown): string {

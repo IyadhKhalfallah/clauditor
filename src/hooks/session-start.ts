@@ -57,18 +57,25 @@ async function buildSessionStartContext(
 
     // Inject session handoff(s) if available
     const { readRecentHandoffs, extractHandoffDescription } = await import('../features/session-state.js')
-    const handoffs = readRecentHandoffs(cwd || null)
+    const handoffs = readRecentHandoffs()
+
+    // Helper: short project label for cross-project sessions
+    const projectLabel = (h: { project: string | null }): string => {
+      if (!h.project || h.project === cwd) return ''
+      const name = h.project.split('/').pop() || h.project
+      return ` [${name}]`
+    }
 
     if (handoffs.length === 1) {
       // Single recent handoff — inject it directly
-      // Frame as something Claude MUST relay before doing anything
       const h = handoffs[0]
       const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
       const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+      const label = projectLabel(h)
 
       parts.push(
         `⚠️ BEFORE doing ANYTHING else, you MUST show this message to the user EXACTLY:\n\n` +
-        `"clauditor: I have context from your previous session (saved ${timeStr}). ` +
+        `"clauditor: I have context from your previous session${label} (saved ${timeStr}). ` +
         `I can see what you were working on. Want me to continue from there, or are you starting something new?"\n\n` +
         `Wait for the user to respond before taking any action.\n\n` +
         `Here is the saved context for reference:\n\n` +
@@ -80,19 +87,65 @@ async function buildSessionStartContext(
         const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
         const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
         const description = extractHandoffDescription(h)
+        const label = projectLabel(h)
 
-        return `${i + 1}. (${timeStr}) ${description}`
+        return `${i + 1}. (${timeStr}) ${description}${label}`
       }).join('\n')
 
       parts.push(
         `⚠️ BEFORE doing ANYTHING else, you MUST show this message to the user EXACTLY:\n\n` +
-        `"clauditor: I found ${handoffs.length} recent sessions for this project:\n\n` +
+        `"clauditor: I found ${handoffs.length} recent sessions:\n\n` +
         options + `\n\n` +
         `Which one would you like to continue, or are you starting something new?"\n\n` +
         `Wait for the user to choose before taking any action. Do NOT pick one yourself.\n\n` +
         `Full context for each session follows:\n\n` +
         handoffs.slice(0, 5).map((h, i) => `--- Session ${i + 1} ---\n${h.content}`).join('\n\n')
       )
+    }
+
+    // Pull team brain from hub (if configured for this project)
+    try {
+      const { resolveHubContext, pullBrain } = await import('../hub/client.js')
+      const hub = resolveHubContext(cwd || undefined)
+      if (hub) {
+        const { getCachedBrain, getCachedEtag, cacheBrain } = await import('../hub/cache.js')
+
+        const cached = getCachedBrain(hub.projectHash)
+        const etag = getCachedEtag(hub.projectHash)
+
+        try {
+          const brain = await pullBrain(hub.projectHash, hub.config, etag)
+          if (brain) {
+            cacheBrain(hub.projectHash, brain)
+            const content = typeof brain.content === 'string' ? brain.content : JSON.stringify(brain.content, null, 2)
+            parts.push(
+              `[clauditor hub — team knowledge (v${brain.version}, ${brain.fragment_count} fragments)]:\n` +
+              `The following project brain was consolidated from your team's coding sessions.\n` +
+              `Use this knowledge to prevent known errors and follow established patterns.\n\n` +
+              content
+            )
+          } else if (cached) {
+            const content = typeof cached.content === 'string' ? cached.content : JSON.stringify(cached.content, null, 2)
+            parts.push(
+              `[clauditor hub — team knowledge (v${cached.version}, cached)]:\n` +
+              `The following project brain was consolidated from your team's coding sessions.\n` +
+              `Use this knowledge to prevent known errors and follow established patterns.\n\n` +
+              content
+            )
+          }
+        } catch {
+          if (cached) {
+            const content = typeof cached.content === 'string' ? cached.content : JSON.stringify(cached.content, null, 2)
+            parts.push(
+              `[clauditor hub — team knowledge (cached, offline)]:\n` +
+              content
+            )
+          }
+        }
+      }
+    } catch (err) {
+      // Hub pull is non-critical — session starts without team knowledge
+      process.stderr.write(`clauditor: hub pull failed (non-critical): ${err}\n`)
     }
 
     // Remind Claude about CLAUDE.md context

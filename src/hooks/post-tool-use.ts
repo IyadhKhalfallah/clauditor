@@ -51,6 +51,7 @@ export async function handlePostToolUseHook(): Promise<void> {
 
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
   const parts: string[] = []
+  const hubPushes: Promise<void>[] = [] // Collect hub pushes to await before exit
 
   // Resolve cwd — may not be provided by Claude Code in all contexts
   const cwd = input.cwd || null
@@ -91,6 +92,28 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       // Command succeeded — check if it's a fix for a recent error
       try { recordFix(cwd, input.tool_input.command) } catch {}
     }
+
+    // Push errors to hub (local recording already handled by recordError above)
+    const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
+    if (command && toolResponse && (toolResponse.includes('error') || toolResponse.includes('Error') || toolResponse.includes('FAILED'))) {
+      hubPushes.push((async () => {
+        try {
+          const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
+          const hub = resolveHubContext(cwd || undefined)
+          if (!hub) return
+
+          await pushKnowledge(hub.projectHash, hub.config.developerHash, [{
+            type: 'error',
+            content: {
+              command: command.slice(0, 200),
+              error_message: toolResponse.slice(0, 500),
+            },
+          }], hub.config, hub.remoteUrl)
+        } catch (err) {
+          process.stderr.write(`clauditor: hub error push failed: ${err}\n`)
+        }
+      })())
+    }
   }
 
   // 2. Detect repeated edits to the same file — a sign of thrashing
@@ -105,6 +128,22 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       if (cwd) {
         try { recordFileEdit(cwd, filePath, input.session_id) } catch {}
       }
+
+      // Push file activity to hub
+      hubPushes.push((async () => {
+        try {
+          const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
+          const hub = resolveHubContext(cwd || undefined)
+          if (!hub) return
+
+          await pushKnowledge(hub.projectHash, hub.config.developerHash, [{
+            type: 'file_activity',
+            content: { file: filePath, action: 'edit' },
+          }], hub.config, hub.remoteUrl)
+        } catch (err) {
+          process.stderr.write(`clauditor: hub file activity push failed: ${err}\n`)
+        }
+      })())
     }
   }
 
@@ -138,6 +177,11 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     if ('additionalContext' in healthResult && healthResult.additionalContext) {
       parts.push(healthResult.additionalContext)
     }
+  }
+
+  // Wait for hub pushes to complete before process exits
+  if (hubPushes.length > 0) {
+    await Promise.allSettled(hubPushes)
   }
 
   if (parts.length === 0) return {}

@@ -179,6 +179,59 @@ program
     }
   })
 
+// ─── clauditor team ──────────────────────────────────────────────
+
+const team = program.command('team').description('Team hub commands')
+
+team
+  .command('join')
+  .description('Join a team on clauditor.ai hub (for the current project)')
+  .requiredOption('-k, --key <api_key>', 'Team API key (from team admin)')
+  .option('--hub-url <url>', 'Hub URL (default: https://clauditor.ai)')
+  .action(async (options) => {
+    const { createHash } = await import('node:crypto')
+    const { hostname, userInfo } = await import('node:os')
+    const { teamJoin } = await import('./hub/client.js')
+    const { setProjectHubConfig } = await import('./config.js')
+    const { getGitRemoteUrl } = await import('./hub/git-project.js')
+
+    const remoteUrl = getGitRemoteUrl()
+    if (!remoteUrl) {
+      console.error('\n  ✗ Not a git repo with a remote origin.')
+      console.error('    Team sync requires a git remote so all team members share the same project identity.')
+      console.error('    Run this from inside a git repo with `git remote add origin <url>` configured.')
+      process.exit(1)
+    }
+
+    const developerHash = createHash('sha256')
+      .update(`${hostname()}:${userInfo().username}`)
+      .digest('hex')
+      .slice(0, 16)
+
+    console.log(`  Project: ${remoteUrl}`)
+    console.log('  Connecting to hub...')
+    try {
+      const result = await teamJoin(options.key, developerHash, options.hubUrl)
+
+      setProjectHubConfig(remoteUrl, {
+        apiKey: options.key,
+        url: options.hubUrl || 'https://clauditor.ai',
+        developerHash,
+        teamName: result.team_name,
+      })
+
+      console.log(`\n  ✓ Joined team "${result.team_name}"`)
+      console.log(`    Plan: ${result.plan}`)
+      console.log(`    Projects: ${result.project_count}`)
+      console.log(`\n  Linked: ${remoteUrl} → ${result.team_name}`)
+      console.log(`  Knowledge will sync automatically during sessions on this project.`)
+      console.log(`  Other projects remain local-only unless you run \`clauditor team join\` in them.`)
+    } catch (err) {
+      console.error(`\n  ✗ Failed to join: ${err instanceof Error ? err.message : err}`)
+      process.exit(1)
+    }
+  })
+
 // ─── clauditor stats ─────────────────────────────────────────────
 
 program
