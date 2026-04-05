@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.23.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.3...v1.23.0) (2026-04-05)
+
+
+### Features
+
+* capture Claude's rotation handoff via Stop hook with marker ([#75](https://github.com/IyadhKhalfallah/clauditor/issues/75)) ([cd3880a](https://github.com/IyadhKhalfallah/clauditor/commit/cd3880aba57d9d3da78e9a86fa65fb385bffa5a5))
+
+
+### Bug Fixes
+
+* add defensive fallbacks in calibration and comprehensive tests ([#74](https://github.com/IyadhKhalfallah/clauditor/issues/74)) ([99e7238](https://github.com/IyadhKhalfallah/clauditor/commit/99e72380deb2cea6c3cbe95982b6fa5702fc5281))
+* resolve failing quota-report tests with proper homedir redirection and timezone handling ([#72](https://github.com/IyadhKhalfallah/clauditor/issues/72)) ([5e6ebe3](https://github.com/IyadhKhalfallah/clauditor/commit/5e6ebe38371850d3708b480b11d9ba92a3a8cc86))
+
 ## [1.22.3](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.2...v1.22.3) (2026-04-04)
 
 
