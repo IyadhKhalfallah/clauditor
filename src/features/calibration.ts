@@ -131,11 +131,11 @@ export function calibrate(): CalibrationData {
     confident = false
   } else if (breakEvenWastes.length < 10) {
     // Moderate data — use 75th percentile
-    wasteThreshold = breakEvenWastes[Math.floor(breakEvenWastes.length * 0.75)]
+    wasteThreshold = breakEvenWastes[Math.floor(breakEvenWastes.length * 0.75)] ?? 10
     confident = true
   } else {
     // Good data — use median
-    wasteThreshold = breakEvenWastes[Math.floor(breakEvenWastes.length / 2)]
+    wasteThreshold = breakEvenWastes[Math.floor(breakEvenWastes.length / 2)] ?? 10
     confident = true
   }
 
