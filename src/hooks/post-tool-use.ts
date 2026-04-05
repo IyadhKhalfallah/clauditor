@@ -3,6 +3,8 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
+import { recordError, recordFix } from '../features/error-index.js'
+import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
 import { hasResumeBoundary } from '../features/resume-detector.js'
@@ -50,6 +52,9 @@ export async function handlePostToolUseHook(): Promise<void> {
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
   const parts: string[] = []
 
+  // Resolve cwd — may not be provided by Claude Code in all contexts
+  const cwd = input.cwd || null
+
   // 1. Compress bash output if applicable
   if (input.tool_name === 'Bash') {
     const toolResponse = input.tool_response || ''
@@ -77,6 +82,14 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     const errorGuidance = detectBashError(input.session_id, toolResponse)
     if (errorGuidance) {
       parts.push(errorGuidance)
+      // Record the error in the project knowledge index
+      const cmd = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
+      if (cwd && cmd) {
+        try { recordError(cwd, cmd, toolResponse.slice(0, 200)) } catch {}
+      }
+    } else if (cwd && typeof input.tool_input?.command === 'string') {
+      // Command succeeded — check if it's a fix for a recent error
+      try { recordFix(cwd, input.tool_input.command) } catch {}
     }
   }
 
@@ -87,6 +100,23 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       const editWarning = trackFileEdits(input.session_id, filePath)
       if (editWarning) {
         parts.push(editWarning)
+      }
+      // Track file edit in project knowledge
+      if (cwd) {
+        try { recordFileEdit(cwd, filePath, input.session_id) } catch {}
+      }
+    }
+  }
+
+  // 2b. Track file reads + inject context for hot files
+  if (input.tool_name === 'Read') {
+    const filePath = (input.tool_input?.file_path as string) || ''
+    if (filePath && cwd) {
+      try { recordFileRead(cwd, filePath, input.session_id) } catch {}
+      // Inject context for hot files (5+ edits, 3+ sessions)
+      const fileCtx = getFileContext(cwd, filePath)
+      if (fileCtx) {
+        parts.push(fileCtx)
       }
     }
   }

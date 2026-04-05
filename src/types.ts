@@ -196,6 +196,7 @@ export interface PostToolUseHookInput {
   tool_name: string
   tool_input: Record<string, unknown>
   tool_response: string
+  cwd?: string
 }
 
 export interface PreToolUseHookInput {
@@ -203,6 +204,7 @@ export interface PreToolUseHookInput {
   hook_event_name: 'PreToolUse'
   tool_name: string
   tool_input: Record<string, unknown>
+  cwd?: string
 }
 
 export interface HookDecision {
