@@ -60,6 +60,13 @@ Copy one of the → lines above, or type something else to start fresh.
 ## Install
 
 ```bash
+brew install IyadhKhalfallah/clauditor/clauditor
+clauditor install
+```
+
+Or via npm:
+
+```bash
 npm install -g @iyadhk/clauditor
 clauditor install
 ```
@@ -74,6 +81,8 @@ npx @iyadhk/clauditor install
 
 Hooks are registered to run via npx automatically.
 
+New hooks are auto-registered on upgrade — no need to re-run `clauditor install`.
+
 Requires Node.js 20+.
 
 **Supported platforms:** Claude Code CLI, VS Code extension, JetBrains extension. Does **not** work with Claude Code on the web (claude.ai/code).
@@ -82,7 +91,7 @@ Requires Node.js 20+.
 
 ## How it works
 
-clauditor registers 6 hooks into Claude Code:
+clauditor registers 7 hooks into Claude Code:
 
 ### `UserPromptSubmit` — blocks before tokens are wasted
 
@@ -118,6 +127,14 @@ Fires after compaction. Receives `compact_summary` — Claude's own LLM-generate
 ### `SessionStart` — injects previous session context
 
 When you start a new session, clauditor reads saved handoff files for this project and injects them into Claude's context. If multiple sessions exist (last 24h), Claude presents the choice.
+
+### `PreToolUse` — prevents known errors
+
+Before Claude runs a command, clauditor checks the error index for previous failures with the same binary. If a known fix exists, it injects it as context — non-blocking, so Claude can adapt without being stopped.
+
+```
+This command has failed 3 times. Known fix: --no-restore
+```
 
 ### `Stop` — blocks infinite loops
 
@@ -206,13 +223,15 @@ Shows token costs by hour of day to detect if peak hours burn more quota:
 | `clauditor doctor` | Scan for cache bugs |
 | `clauditor calibrate` | Auto-calibrate rotation threshold |
 | `clauditor suggest-skill` | Find repeating workflows |
+| `clauditor knowledge` | Show accumulated errors and file activity |
 
 ## Audit-only mode (no hooks)
 
 Don't want clauditor to block or modify your sessions? Skip `clauditor install` and use it as a read-only analytics tool:
 
 ```bash
-npm install -g @iyadhk/clauditor
+brew install IyadhKhalfallah/clauditor/clauditor
+# or: npm install -g @iyadhk/clauditor
 clauditor report      # see waste across all sessions
 clauditor time        # peak vs off-peak token analysis
 clauditor sessions    # per-session breakdown
@@ -297,6 +316,22 @@ Multiple sessions in the same project don't overwrite each other. Files older th
 4. clauditor blocks with your saved sessions and copyable prompts
 5. You paste the prompt — Claude reads the file and picks up where you left off
 
+## Project memory
+
+clauditor learns from your sessions and builds per-project knowledge at `~/.clauditor/knowledge/<project>/`.
+
+**Error index** — Records failed commands and their fixes. When a command fails and later succeeds, clauditor remembers the fix. Next time Claude tries the same command, the `PreToolUse` hook injects the known fix before it runs.
+
+**File tracker** — Tracks edit/read counts across sessions. Identifies "hot files" (5+ edits across 3+ sessions) and injects context when Claude touches them, so it knows the file's history.
+
+```bash
+clauditor knowledge   # see accumulated errors and file activity
+```
+
+## Cross-project session handoffs
+
+Session handoffs work across projects. If you save a session in project A and open project B, clauditor finds it. Cross-project sessions show `[project-name]` labels so you know where they came from.
+
 ## Version-aware warnings
 
 clauditor detects if your sessions ran on Claude Code versions 2.1.69-2.1.89, which have a [confirmed prompt caching bug](https://github.com/anthropics/claude-code/issues/34629) that causes 10-20x token consumption. The warning appears in `clauditor report` and via real-time hooks.
@@ -329,6 +364,7 @@ After 200 turns, the history alone can be 200k+ tokens. A fresh session resets t
 |---|---|---|
 | `UserPromptSubmit` | Exit code 2 + stderr | Hard block — stops prompt, shows message |
 | `PostToolUse` | Exit code 2 + stderr | Blocking error — Claude acknowledges and stops |
+| `PreToolUse` | `additionalContext` | Injects known error fixes before commands |
 | `PreCompact` | File write | Saves fallback state at compaction moment |
 | `PostCompact` | File write | Captures Claude's own LLM summary |
 | `SessionStart` | `additionalContext` | Injects previous session state |
@@ -349,7 +385,7 @@ After 200 turns, the history alone can be 200k+ tokens. A fresh session resets t
 git clone https://github.com/IyadhKhalfallah/clauditor.git
 cd clauditor
 npm install
-npm test        # 131 tests
+npm test        # 211 tests
 npm run build
 npm link        # makes `clauditor` available globally
 ```
