@@ -390,6 +390,12 @@ npm run build
 npm link        # makes `clauditor` available globally
 ```
 
+## Community Projects
+
+| Project | Description |
+|---|---|
+| [CAMH](https://github.com/protonfotonmoton/camh) | Clauditor Autonomous Memory Handoff — 6-layer memory protocol that gives any AI session full context from the last one. Drop-in companion for Clauditor. |
+
 ## Legal
 
 MIT License. Not affiliated with or endorsed by Anthropic.
