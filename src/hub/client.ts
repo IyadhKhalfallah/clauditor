@@ -1,7 +1,7 @@
 import { getProjectHubConfig, type ProjectHubConfig } from '../config.js'
 import { getGitRemoteUrl, getProjectHash } from './git-project.js'
 
-const DEFAULT_HUB_URL = 'https://clauditor.ai'
+// No default hub URL — must be configured via `clauditor team join --hub-url`
 
 /**
  * Resolve hub config for the current working directory.
@@ -29,7 +29,8 @@ async function hubFetch(
   hubConfig: ProjectHubConfig,
   options: RequestInit = {}
 ): Promise<Response> {
-  const url = `${hubConfig.url || DEFAULT_HUB_URL}${path}`
+  if (!hubConfig.url) throw new Error('Hub URL not configured. Run `clauditor team join --hub-url <url>`')
+  const url = `${hubConfig.url}${path}`
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -48,7 +49,8 @@ export async function teamJoin(
   developerHash: string,
   hubUrl?: string
 ): Promise<{ team_name: string; team_id: string; project_count: number; plan: string }> {
-  const url = hubUrl || DEFAULT_HUB_URL
+  if (!hubUrl) throw new Error('Hub URL is required. Use --hub-url <url>')
+  const url = hubUrl
   const res = await fetch(`${url}/api/v1/team/join`, {
     method: 'POST',
     headers: { 'X-Clauditor-Key': apiKey, 'Content-Type': 'application/json' },

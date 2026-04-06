@@ -76,7 +76,7 @@ export function getProjectHubConfig(gitRemoteUrl: string): ProjectHubConfig | nu
   if (config.hub?.apiKey && config.hub?.developerHash) {
     return {
       apiKey: config.hub.apiKey,
-      url: config.hub.url || 'https://clauditor.ai',
+      url: config.hub.url || '',
       developerHash: config.hub.developerHash,
     }
   }

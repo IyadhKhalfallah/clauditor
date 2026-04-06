@@ -185,9 +185,9 @@ const team = program.command('team').description('Team hub commands')
 
 team
   .command('join')
-  .description('Join a team on clauditor.ai hub (for the current project)')
+  .description('Join a team hub (for the current project)')
   .requiredOption('-k, --key <api_key>', 'Team API key (from team admin)')
-  .option('--hub-url <url>', 'Hub URL (default: https://clauditor.ai)')
+  .requiredOption('--hub-url <url>', 'Hub URL (provided by your team admin)')
   .action(async (options) => {
     const { createHash } = await import('node:crypto')
     const { hostname, userInfo } = await import('node:os')
@@ -215,7 +215,7 @@ team
 
       setProjectHubConfig(remoteUrl, {
         apiKey: options.key,
-        url: options.hubUrl || 'https://clauditor.ai',
+        url: options.hubUrl,
         developerHash,
         teamName: result.team_name,
       })
