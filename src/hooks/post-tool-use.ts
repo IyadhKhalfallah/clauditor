@@ -108,7 +108,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     }
   }
 
-  // 2b. Track file reads + inject context for hot files
+  // 2b. Track file reads + inject context for hot files + error cross-reference
   if (input.tool_name === 'Read') {
     const filePath = (input.tool_input?.file_path as string) || ''
     if (filePath && cwd) {
@@ -118,6 +118,24 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       if (fileCtx) {
         parts.push(fileCtx)
       }
+      // Cross-reference: known errors involving this file
+      try {
+        const { readErrorIndex } = await import('../features/error-index.js')
+        const errors = readErrorIndex(cwd)
+        const fileName = filePath.split('/').pop() || ''
+        const related = errors.filter((e) =>
+          e.fix && (e.command.includes(fileName) || e.error.includes(fileName))
+        )
+        if (related.length > 0) {
+          const lines = related.slice(0, 3).map((e) =>
+            `- \`${e.command.slice(0, 50)}\`: ${e.error.slice(0, 80)}` +
+            (e.fix ? ` → fix: \`${e.fix.slice(0, 60)}\`` : '')
+          )
+          parts.push(
+            `[clauditor]: Known errors related to \`${fileName}\`:\n` + lines.join('\n')
+          )
+        }
+      } catch {}
     }
   }
 

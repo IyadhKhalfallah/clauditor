@@ -103,6 +103,17 @@ async function buildSessionStartContext(
       )
     }
 
+    // Inject project knowledge brief (errors, hot files, recent context)
+    if (cwd) {
+      try {
+        const { buildProjectBrief } = await import('../features/project-brief.js')
+        const brief = buildProjectBrief(cwd)
+        if (brief) parts.push(brief)
+      } catch {
+        // Non-critical — local knowledge not available yet
+      }
+    }
+
     // Remind Claude about CLAUDE.md context
     if (cwd) {
       const claudeMdPath = resolve(cwd, 'CLAUDE.md')
