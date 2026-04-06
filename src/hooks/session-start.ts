@@ -114,6 +114,25 @@ async function buildSessionStartContext(
       }
     }
 
+    // Pull team knowledge from hub (if configured for this project)
+    if (cwd) {
+      try {
+        const { resolveHubContext, pullCoreTier } = await import('../hub/client.js')
+        const hub = resolveHubContext(cwd)
+        if (hub) {
+          const core = await pullCoreTier(hub.projectHash, hub.config)
+          if (core?.core) {
+            parts.push(
+              `[clauditor hub — team knowledge]:\n` +
+              core.core
+            )
+          }
+        }
+      } catch {
+        // Hub unavailable — local knowledge is enough
+      }
+    }
+
     // Remind Claude about CLAUDE.md context
     if (cwd) {
       const claudeMdPath = resolve(cwd, 'CLAUDE.md')

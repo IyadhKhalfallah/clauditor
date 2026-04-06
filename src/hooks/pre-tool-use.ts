@@ -33,35 +33,73 @@ export async function handlePreToolUseHook(): Promise<void> {
   const input = await readStdin()
   const hookInput = JSON.parse(input) as PreToolUseHookInput
 
-  const decision = processPreToolUse(hookInput)
+  const decision = await processPreToolUse(hookInput)
   outputDecision(decision)
 }
 
-function processPreToolUse(input: PreToolUseHookInput): HookDecision {
+async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecision> {
   // Only check Bash commands
   if (input.tool_name !== 'Bash') return {}
 
   const command = input.tool_input?.command as string
-  if (!command || !input.cwd) return {}
+  if (!command) return {}
 
-  // Rate limit: one injection per unique command per session (persisted to disk)
-  const key = `${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
-  const injected = readInjected()
-  if (injected[key]) return {}
+  const parts: string[] = []
 
-  const knownError = findKnownError(input.cwd, command)
-  if (!knownError) return {}
-
-  markInjected(key)
-
-  let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
-  context += `Last error: ${knownError.error.slice(0, 150)}`
-
-  if (knownError.fix) {
-    context += `\nKnown fix: \`${knownError.fix.slice(0, 100)}\``
+  // 1. Local error index check (free, offline, instant)
+  if (input.cwd) {
+    const key = `${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
+    const injected = readInjected()
+    if (!injected[key]) {
+      const knownError = findKnownError(input.cwd, command)
+      if (knownError) {
+        markInjected(key)
+        let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
+        context += `Last error: ${knownError.error.slice(0, 150)}`
+        if (knownError.fix) {
+          context += `\nKnown fix: \`${knownError.fix.slice(0, 100)}\``
+        }
+        parts.push(context)
+      }
+    }
   }
 
-  return { additionalContext: context }
+  // 2. Hub contextual query (team-wide knowledge, if configured)
+  if (input.cwd) {
+    const hubKey = `hub:${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
+    const injected = readInjected()
+    if (!injected[hubKey]) {
+      try {
+        const { resolveHubContext, queryKnowledge } = await import('../hub/client.js')
+        const hub = resolveHubContext(input.cwd)
+        if (hub) {
+          const result = await queryKnowledge(hub.projectHash, 'command', command, hub.config)
+          if (result.entries.length > 0) {
+            markInjected(hubKey)
+            const lines = result.entries.map((e) => {
+              const body = e.body as Record<string, string>
+              if (e.entry_type === 'error_fix') {
+                return `- **${e.title}**: ${body.error_pattern || ''}\n  Fix: ${body.fix || 'unknown'}`
+              }
+              if (e.entry_type === 'gotcha') {
+                return `- **${e.title}**: ${body.description || ''}\n  Fix: ${body.solution || ''}`
+              }
+              return `- **${e.title}** (${e.entry_type})`
+            })
+            parts.push(
+              `[clauditor hub — team knowledge for \`${command.split(/\s+/).slice(0, 2).join(' ')}\`]:\n` +
+              lines.join('\n')
+            )
+          }
+        }
+      } catch {
+        // Hub unavailable — local check is enough
+      }
+    }
+  }
+
+  if (parts.length === 0) return {}
+  return { additionalContext: parts.join('\n\n') }
 }
 
 // Run if invoked directly
