@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.24.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.23.0...v1.24.0) (2026-04-06)
+
+
+### Features
+
+* auto-register missing hooks on npm upgrade (respects audit-only) ([#78](https://github.com/IyadhKhalfallah/clauditor/issues/78)) ([f712540](https://github.com/IyadhKhalfallah/clauditor/commit/f712540f037e68b328180f49fddf45ea26518350))
+* project memory — error index, file tracker, error prevention ([#77](https://github.com/IyadhKhalfallah/clauditor/issues/77)) ([cf6bc4d](https://github.com/IyadhKhalfallah/clauditor/commit/cf6bc4dd4654fc3100b746d2a96ad828721b5d1a))
+
+
+### Bug Fixes
+
+* cross-project session handoffs + error logging ([#83](https://github.com/IyadhKhalfallah/clauditor/issues/83)) ([f30524b](https://github.com/IyadhKhalfallah/clauditor/commit/f30524b46421e2a9b00f6c9bf03c2d5398511db2))
+* don't block "continue" in existing sessions ([#81](https://github.com/IyadhKhalfallah/clauditor/issues/81)) ([a995c52](https://github.com/IyadhKhalfallah/clauditor/commit/a995c527f87805c55e063d47b86da41ae87138a5))
+
 ## [1.23.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.22.3...v1.23.0) (2026-04-05)
 
 
