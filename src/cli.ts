@@ -1081,13 +1081,14 @@ const isHook = args[0] === 'hook'
 
 if (!isHook) {
   try {
-    const { checkForUpdate } = await import('./features/update-check.js')
+    const { checkForUpdate, getInstallMethod, getUpgradeCommand } = await import('./features/update-check.js')
     const latest = checkForUpdate(pkg.version)
     if (latest) {
+      const cmd = getUpgradeCommand(getInstallMethod())
       // Show after command output
       process.on('exit', () => {
         console.error(`\n  clauditor update available: ${pkg.version} → ${latest}`)
-        console.error(`  Run: npm install -g @iyadhk/clauditor@latest\n`)
+        console.error(`  Run: ${cmd}\n`)
       })
     }
   } catch {}
