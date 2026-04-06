@@ -150,7 +150,9 @@ function captureRotationHandoff(input: StopHookInput): void {
       session: input.session_id.slice(0, 8),
       message: `Stop hook: captured Claude's rotation handoff summary (${msg.length} chars)`,
     }).catch(() => {})
-  } catch {}
+  } catch (err) {
+    process.stderr.write(`clauditor: failed to save rotation handoff: ${err}\n`)
+  }
 }
 
 function hashValue(value: unknown): string {

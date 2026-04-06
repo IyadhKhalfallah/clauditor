@@ -111,7 +111,9 @@ export function saveSessionState(data: SessionStateData): void {
 
     // Also write to legacy path for backward compat
     writeFileSync(LEGACY_SESSION_FILE, sections.join('\n'))
-  } catch {}
+  } catch (err) {
+    process.stderr.write(`clauditor: failed to save session state: ${err}\n`)
+  }
 }
 
 /**
@@ -134,7 +136,9 @@ export function savePostCompactSummary(summary: string, cwd: string | null): voi
     const timestamp = Date.now()
     writeFileSync(resolve(dir, `${timestamp}.md`), content)
     writeFileSync(LEGACY_SESSION_FILE, content)
-  } catch {}
+  } catch (err) {
+    process.stderr.write(`clauditor: failed to save PostCompact summary: ${err}\n`)
+  }
 }
 
 export interface HandoffFile {
@@ -142,6 +146,8 @@ export interface HandoffFile {
   content: string
   timestamp: number
   isPostCompact: boolean
+  /** Project path extracted from handoff content (e.g. "/Users/.../my-project") */
+  project: string | null
 }
 
 /**
@@ -207,54 +213,75 @@ export function extractHandoffDescription(handoff: HandoffFile): string {
 }
 
 /**
- * Read recent handoff files for a given cwd (last 24 hours).
+ * Read recent handoff files across ALL projects (last 24 hours).
+ * Scans every subdirectory under ~/.clauditor/sessions/ so that
+ * cross-project handoffs are always visible.
  * Returns them sorted by timestamp, most recent first.
  */
-export function readRecentHandoffs(cwd: string | null): HandoffFile[] {
+export function readRecentHandoffs(_cwd?: string | null): HandoffFile[] {
   const results: HandoffFile[] = []
   const cutoff = Date.now() - MAX_HANDOFF_AGE_MS
 
-  // Check per-session directory
-  const dir = getSessionsDir(cwd)
+  // Scan all project subdirectories under SESSIONS_DIR
+  const dirsToScan: string[] = []
   try {
-    const files = readdirSync(dir).filter(f => f.endsWith('.md'))
-    for (const file of files) {
-      const filePath = resolve(dir, file)
-      try {
-        // Use filename timestamp (more reliable than mtime for age check)
-        const fileTs = parseInt(basename(file, '.md'), 10)
-        const stat = statSync(filePath)
-        const effectiveTs = isNaN(fileTs) ? stat.mtimeMs : fileTs
-
-        if (effectiveTs < cutoff) {
-          // Clean up old files
-          try { unlinkSync(filePath) } catch {}
-          continue
-        }
-        const content = readFileSync(filePath, 'utf-8')
-        results.push({
-          path: filePath,
-          content,
-          timestamp: effectiveTs,
-          isPostCompact: content.includes('PostCompact'),
-        })
-      } catch {}
+    const entries = readdirSync(SESSIONS_DIR, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        dirsToScan.push(resolve(SESSIONS_DIR, entry.name))
+      }
     }
   } catch {
-    // Directory doesn't exist yet
+    // Sessions dir doesn't exist yet
   }
 
-  // Fallback: check legacy file if no per-session files found
+  // Also scan the root sessions dir (for files saved without cwd)
+  dirsToScan.push(SESSIONS_DIR)
+
+  for (const dir of dirsToScan) {
+    try {
+      const files = readdirSync(dir).filter(f => f.endsWith('.md'))
+      for (const file of files) {
+        const filePath = resolve(dir, file)
+        try {
+          const fileTs = parseInt(basename(file, '.md'), 10)
+          const st = statSync(filePath)
+          const effectiveTs = isNaN(fileTs) ? st.mtimeMs : fileTs
+
+          if (effectiveTs < cutoff) {
+            try { unlinkSync(filePath) } catch {}
+            continue
+          }
+          const content = readFileSync(filePath, 'utf-8')
+
+          // Extract project name from content for labeling
+          const projectMatch = content.match(/\*\*Project:\*\*\s*(.+)/)
+          const project = projectMatch ? projectMatch[1].trim() : null
+
+          results.push({
+            path: filePath,
+            content,
+            timestamp: effectiveTs,
+            isPostCompact: content.includes('PostCompact'),
+            project,
+          })
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // Fallback: check legacy file if nothing found
   if (results.length === 0) {
     try {
-      const stat = statSync(LEGACY_SESSION_FILE)
-      if (stat.mtimeMs >= cutoff) {
+      const st = statSync(LEGACY_SESSION_FILE)
+      if (st.mtimeMs >= cutoff) {
         const content = readFileSync(LEGACY_SESSION_FILE, 'utf-8')
         results.push({
           path: LEGACY_SESSION_FILE,
           content,
-          timestamp: stat.mtimeMs,
+          timestamp: st.mtimeMs,
           isPostCompact: content.includes('PostCompact'),
+          project: null,
         })
       }
     } catch {}

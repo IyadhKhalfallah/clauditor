@@ -278,8 +278,16 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
     }
   }
 
-  const handoffs = readRecentHandoffs(hookInput.cwd || null)
+  const handoffs = readRecentHandoffs()
   if (handoffs.length === 0) return null
+
+  // Helper: short project label for cross-project sessions
+  const currentCwd = hookInput.cwd || null
+  const projectLabel = (h: typeof handoffs[0]): string => {
+    if (!h.project || h.project === currentCwd) return ''
+    const name = h.project.split('/').pop() || h.project
+    return ` [${name}]`
+  }
 
   if (handoffs.length === 1) {
     const h = handoffs[0]
@@ -287,6 +295,7 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
     const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
     const desc = extractHandoffDescription(h)
     const shortPath = shortenPath(h.path)
+    const label = projectLabel(h)
 
     return {
       decision: 'block',
@@ -294,7 +303,7 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
         `\n╔══════════════════════════════════════════════════════════════╗\n` +
         `║  clauditor: Previous session found (saved ${timeStr})        ║\n` +
         `╚══════════════════════════════════════════════════════════════╝\n\n` +
-        `  ${desc}\n\n` +
+        `  ${desc}${label}\n\n` +
         `To continue, copy and paste this:\n\n` +
         `  read ${shortPath} and continue where I left off\n\n` +
         `Or type something else to start fresh.`,
@@ -307,8 +316,9 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
     const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
     const desc = extractHandoffDescription(h)
     const shortPath = shortenPath(h.path)
+    const label = projectLabel(h)
 
-    return `  ${i + 1}. (${timeStr}) ${desc}\n     → read ${shortPath} and continue where I left off`
+    return `  ${i + 1}. (${timeStr}) ${desc}${label}\n     → read ${shortPath} and continue where I left off`
   })
 
   const lines = choices.join('\n\n')
