@@ -103,48 +103,29 @@ async function buildSessionStartContext(
       )
     }
 
-    // Pull team brain from hub (if configured for this project)
+    // Pull core tier from hub (if configured for this project)
+    // Core tier is a compact summary (< 500 tokens) of top conventions,
+    // gotchas, known errors, and key decisions — enough context without
+    // dumping the entire brain into the session start.
     try {
-      const { resolveHubContext, pullBrain } = await import('../hub/client.js')
+      const { resolveHubContext, pullCoreTier } = await import('../hub/client.js')
       const hub = resolveHubContext(cwd || undefined)
       if (hub) {
-        const { getCachedBrain, getCachedEtag, cacheBrain } = await import('../hub/cache.js')
-
-        const cached = getCachedBrain(hub.projectHash)
-        const etag = getCachedEtag(hub.projectHash)
-
         try {
-          const brain = await pullBrain(hub.projectHash, hub.config, etag)
-          if (brain) {
-            cacheBrain(hub.projectHash, brain)
-            const content = typeof brain.content === 'string' ? brain.content : JSON.stringify(brain.content, null, 2)
+          const core = await pullCoreTier(hub.projectHash, hub.config)
+          if (core && core.core) {
             parts.push(
-              `[clauditor hub — team knowledge (v${brain.version}, ${brain.fragment_count} fragments)]:\n` +
-              `The following project brain was consolidated from your team's coding sessions.\n` +
-              `Use this knowledge to prevent known errors and follow established patterns.\n\n` +
-              content
-            )
-          } else if (cached) {
-            const content = typeof cached.content === 'string' ? cached.content : JSON.stringify(cached.content, null, 2)
-            parts.push(
-              `[clauditor hub — team knowledge (v${cached.version}, cached)]:\n` +
-              `The following project brain was consolidated from your team's coding sessions.\n` +
-              `Use this knowledge to prevent known errors and follow established patterns.\n\n` +
-              content
+              `[clauditor hub — team knowledge (core, ~${core.token_estimate} tokens)]:\n` +
+              `Key project knowledge from your team. For deeper context on specific commands or files,\n` +
+              `clauditor will inject relevant entries automatically when needed.\n\n` +
+              core.core
             )
           }
         } catch {
-          if (cached) {
-            const content = typeof cached.content === 'string' ? cached.content : JSON.stringify(cached.content, null, 2)
-            parts.push(
-              `[clauditor hub — team knowledge (cached, offline)]:\n` +
-              content
-            )
-          }
+          // Hub unavailable — session starts without team knowledge
         }
       }
     } catch (err) {
-      // Hub pull is non-critical — session starts without team knowledge
       process.stderr.write(`clauditor: hub pull failed (non-critical): ${err}\n`)
     }
 

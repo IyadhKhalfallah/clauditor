@@ -157,6 +157,38 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       if (fileCtx) {
         parts.push(fileCtx)
       }
+
+      // Query hub for team knowledge about this file
+      hubPushes.push((async () => {
+        try {
+          const { resolveHubContext, queryKnowledge } = await import('../hub/client.js')
+          const hub = resolveHubContext(cwd || undefined)
+          if (!hub) return
+
+          const result = await queryKnowledge(hub.projectHash, 'file', filePath, hub.config)
+          if (result.entries.length > 0) {
+            const lines = result.entries.map((e) => {
+              const body = e.body as Record<string, string>
+              if (e.entry_type === 'file_role') {
+                return `- **${e.title}**: ${body.role || ''}${body.gotchas?.length ? `\n  Gotchas: ${(body.gotchas as unknown as string[]).join(', ')}` : ''}`
+              }
+              if (e.entry_type === 'convention') {
+                return `- **${e.title}**: ${body.pattern || body.description || ''}`
+              }
+              if (e.entry_type === 'gotcha') {
+                return `- **${e.title}**: ${body.description || ''}${body.solution ? `\n  Fix: ${body.solution}` : ''}`
+              }
+              return `- **${e.title}** (${e.entry_type})`
+            })
+            parts.push(
+              `[clauditor hub — team knowledge for \`${filePath.split('/').pop()}\`]:\n` +
+              lines.join('\n')
+            )
+          }
+        } catch {
+          // Hub unavailable — local context is enough
+        }
+      })())
     }
   }
 

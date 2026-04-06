@@ -117,6 +117,48 @@ export async function pullBrain(
   } as { content: unknown; version: number; token_count: number; fragment_count: number; etag: string }
 }
 
+export async function pullCoreTier(
+  projectHash: string,
+  hubConfig: ProjectHubConfig
+): Promise<{ core: string; token_estimate: number } | null> {
+  const res = await hubFetch(
+    `/api/v1/knowledge/pull?project_hash=${encodeURIComponent(projectHash)}&tier=core`,
+    hubConfig
+  )
+  if (!res.ok) return null
+  const data = (await res.json()) as { core: string; token_estimate: number }
+  if (!data.core) return null
+  return data
+}
+
+export interface KnowledgeQueryEntry {
+  id: string
+  entry_type: string
+  title: string
+  body: Record<string, unknown>
+  confidence: number
+  effective_confidence: number
+  hit_count: number
+  related_files: string[]
+  tags: string[]
+}
+
+export async function queryKnowledge(
+  projectHash: string,
+  contextType: 'command' | 'file',
+  contextValue: string,
+  hubConfig: ProjectHubConfig
+): Promise<{ entries: KnowledgeQueryEntry[]; count: number }> {
+  const res = await hubFetch(
+    `/api/v1/knowledge/query?project_hash=${encodeURIComponent(projectHash)}` +
+    `&context_type=${encodeURIComponent(contextType)}` +
+    `&context_value=${encodeURIComponent(contextValue)}`,
+    hubConfig
+  )
+  if (!res.ok) return { entries: [], count: 0 }
+  return res.json() as Promise<{ entries: KnowledgeQueryEntry[]; count: number }>
+}
+
 export async function checkCommand(
   projectHash: string,
   command: string,

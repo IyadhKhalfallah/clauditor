@@ -67,34 +67,36 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
     }
   }
 
-  // 2. Hub error check (team-wide, if configured for this project)
+  // 2. Hub contextual query (team-wide structured entries, if configured)
   const hub = resolveHubContext(input.cwd || undefined)
   if (hub) {
-    try {
-      const { checkCommand } = await import('../hub/client.js')
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 2000)
-
+    const hubKey = `hub:${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
+    const injected = readInjected()
+    if (!injected[hubKey]) {
       try {
-        const result = await checkCommand(hub.projectHash, command, hub.config)
-        clearTimeout(timeout)
+        const { queryKnowledge } = await import('../hub/client.js')
+        const result = await queryKnowledge(hub.projectHash, 'command', command, hub.config)
 
-        if (result.known_error && result.known_error.confidence >= 0.5) {
-          const err = result.known_error
+        if (result.entries.length > 0) {
+          markInjected(hubKey)
+          const lines = result.entries.map((e) => {
+            const body = e.body as Record<string, string>
+            if (e.entry_type === 'error_fix') {
+              return `- **${e.title}**: ${body.error_pattern || ''}\n  Fix: ${body.fix || 'unknown'}`
+            }
+            if (e.entry_type === 'gotcha') {
+              return `- **${e.title}**: ${body.description || ''}\n  Fix: ${body.solution || ''}`
+            }
+            return `- **${e.title}** (${e.entry_type})`
+          })
           parts.push(
-            `[clauditor hub]: This command is known to fail across your team.\n` +
-            `Error: ${err.error_message}\n` +
-            `Known fix: ${err.fix_command}\n` +
-            `Confidence: ${(err.confidence * 100).toFixed(0)}% (based on team reports)`
+            `[clauditor hub — team knowledge for \`${command.split(/\s+/).slice(0, 2).join(' ')}\`]:\n` +
+            lines.join('\n')
           )
         }
-      } finally {
-        clearTimeout(timeout)
+      } catch {
+        // Hub unavailable — local check is enough
       }
-    } catch (err) {
-      // Hub unavailable — local check is enough
-      process.stderr.write(`clauditor: hub error check failed (non-critical): ${err}\n`)
     }
   }
 
