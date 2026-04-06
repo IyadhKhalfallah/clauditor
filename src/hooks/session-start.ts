@@ -57,18 +57,25 @@ async function buildSessionStartContext(
 
     // Inject session handoff(s) if available
     const { readRecentHandoffs, extractHandoffDescription } = await import('../features/session-state.js')
-    const handoffs = readRecentHandoffs(cwd || null)
+    const handoffs = readRecentHandoffs()
+
+    // Helper: short project label for cross-project sessions
+    const projectLabel = (h: { project: string | null }): string => {
+      if (!h.project || h.project === cwd) return ''
+      const name = h.project.split('/').pop() || h.project
+      return ` [${name}]`
+    }
 
     if (handoffs.length === 1) {
       // Single recent handoff — inject it directly
-      // Frame as something Claude MUST relay before doing anything
       const h = handoffs[0]
       const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
       const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+      const label = projectLabel(h)
 
       parts.push(
         `⚠️ BEFORE doing ANYTHING else, you MUST show this message to the user EXACTLY:\n\n` +
-        `"clauditor: I have context from your previous session (saved ${timeStr}). ` +
+        `"clauditor: I have context from your previous session${label} (saved ${timeStr}). ` +
         `I can see what you were working on. Want me to continue from there, or are you starting something new?"\n\n` +
         `Wait for the user to respond before taking any action.\n\n` +
         `Here is the saved context for reference:\n\n` +
@@ -80,13 +87,14 @@ async function buildSessionStartContext(
         const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
         const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
         const description = extractHandoffDescription(h)
+        const label = projectLabel(h)
 
-        return `${i + 1}. (${timeStr}) ${description}`
+        return `${i + 1}. (${timeStr}) ${description}${label}`
       }).join('\n')
 
       parts.push(
         `⚠️ BEFORE doing ANYTHING else, you MUST show this message to the user EXACTLY:\n\n` +
-        `"clauditor: I found ${handoffs.length} recent sessions for this project:\n\n` +
+        `"clauditor: I found ${handoffs.length} recent sessions:\n\n` +
         options + `\n\n` +
         `Which one would you like to continue, or are you starting something new?"\n\n` +
         `Wait for the user to choose before taking any action. Do NOT pick one yourself.\n\n` +
