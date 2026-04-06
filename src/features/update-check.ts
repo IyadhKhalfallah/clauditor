@@ -30,6 +30,26 @@ function isNewer(a: string, b: string): boolean {
   return false
 }
 
+/**
+ * Detect how clauditor was installed so we can suggest the right upgrade command.
+ */
+export function getInstallMethod(): 'brew' | 'npm' {
+  try {
+    const brewPrefix = execSync('brew --prefix 2>/dev/null', {
+      timeout: 3000,
+      encoding: 'utf-8',
+    }).trim()
+    if (process.argv[1]?.startsWith(brewPrefix)) return 'brew'
+  } catch {}
+  return 'npm'
+}
+
+export function getUpgradeCommand(method: 'brew' | 'npm'): string {
+  return method === 'brew'
+    ? 'brew upgrade clauditor'
+    : 'npm install -g @iyadhk/clauditor@latest'
+}
+
 export function checkForUpdate(currentVersion: string): string | null {
   // Read cache
   try {
