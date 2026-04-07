@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.25.0...v1.25.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* remove language-dependent categories, rename to structural coverage ([#98](https://github.com/IyadhKhalfallah/clauditor/issues/98)) ([c283851](https://github.com/IyadhKhalfallah/clauditor/commit/c2838514770f13cb58f8bd172286eca9a34b4a9f))
+
 ## [1.25.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.24.0...v1.25.0) (2026-04-07)
 
 
