@@ -120,9 +120,9 @@ Also detects: cache degradation, token spikes, resume anomalies, edit thrashing,
 
 Fires at the exact moment before Claude Code compacts your context. Saves session state as a fallback in case PostCompact doesn't fire.
 
-### `PostCompact` — captures Claude's own session summary
+### `PostCompact` — captures Claude's summary + mechanical state
 
-Fires after compaction. Receives `compact_summary` — Claude's own LLM-generated summary of the session, created while it still had full context. This is dramatically richer than mechanical extraction because Claude knows the reasoning, blockers, and plan.
+Fires after compaction. Merges Claude's own LLM-generated summary with mechanically extracted structured data (files, commits, commands) from the JSONL transcript. The combined handoff preserves ~60% of verifiable session facts — 3x better than prose alone.
 
 ### `SessionStart` — injects previous session context
 
@@ -130,11 +130,15 @@ When you start a new session, clauditor reads saved handoff files for this proje
 
 ### `PreToolUse` — prevents known errors
 
-Before Claude runs a command, clauditor checks the error index for previous failures with the same binary. If a known fix exists, it injects it as context — non-blocking, so Claude can adapt without being stopped.
+Before Claude runs a command, clauditor checks the local error index (and optionally the team hub) for previous failures with the same binary. If a known fix exists with sufficient confidence, it injects it as context — non-blocking, so Claude can adapt without being stopped.
 
 ```
-This command has failed 3 times. Known fix: --no-restore
+[clauditor]: `npm run build` has failed 5 times on this project.
+Last error: Module not found: Cannot resolve @/lib/db
+Known fix: `npx drizzle-kit push && npm run build`
 ```
+
+If the command succeeds after the warning, confidence increases. If it fails despite the warning, confidence decreases. The knowledge base self-corrects over time.
 
 ### `Stop` — blocks infinite loops
 
@@ -224,6 +228,8 @@ Shows token costs by hour of day to detect if peak hours burn more quota:
 | `clauditor calibrate` | Auto-calibrate rotation threshold |
 | `clauditor suggest-skill` | Find repeating workflows |
 | `clauditor knowledge` | Show accumulated errors and file activity |
+| `clauditor handoff-report` | Measure information preservation of last session handoff |
+| `clauditor team join` | Connect to a clauditor hub for team knowledge sharing |
 
 ## Audit-only mode (no hooks)
 
@@ -250,6 +256,8 @@ clauditor operates at the **session boundary** layer — it monitors waste and r
 | [Headroom](https://github.com/chopratejas/headroom) | API proxy | Compresses tool output tokens (~34% savings per turn) | No — works at HTTP level |
 | [MemStack](https://github.com/cwinvestments/memstack) | Persistent memory | SQLite + vector DB for cross-session knowledge | No — uses skills + rules |
 | [Claude Workspace Optimizer](https://oakenai.tech/tools/claude-workspace-optimizer) | Static workspace | Audits CLAUDE.md and memory files for bloat | No — runs before sessions |
+| [GrapeRoot](https://github.com/nicobailon/graperoot) | Per-turn context | Builds code graph, pre-loads relevant files | No — complementary |
+| [Hippo Memory](https://github.com/kitfunso/hippo-memory) | Persistent memory | Neuroscience-inspired memory with decay | No — different approach |
 
 You can run all of them together. clauditor handles when to rotate; the others optimize what happens within a session.
 
@@ -281,22 +289,55 @@ Created automatically on `clauditor install`. Edit to customize.
 
 ## How it saves context
 
-clauditor uses two methods to save session context, depending on what triggered the save:
+clauditor combines two methods to maximize information preservation during session rotation.
 
-### PostCompact (preferred) — Claude's own summary
+### Structured handoff template
 
-When Claude Code compacts your session, the `PostCompact` hook captures `compact_summary` — Claude's own LLM-generated summary, created while it still had full context. This includes reasoning, decisions, blockers, and plans that no mechanical extraction can capture.
+When clauditor blocks a session for rotation, it tells Claude to write its handoff in a structured format:
 
-### Rotation block (fallback) — mechanical extraction
+```
+TASK: (what you were working on)
+COMPLETED: (what's done)
+IN_PROGRESS: (what's partially done, with file paths)
+FAILED_APPROACHES: (what was tried and didn't work, and WHY)
+DEPENDENCIES: (things that must happen in order)
+DECISIONS: (choices made and why)
+USER_PREFERENCES: (what the user asked for or rejected)
+BLOCKERS: (unresolved issues)
+```
 
-When clauditor blocks a session (waste factor too high), it extracts structured data from the JSONL transcript:
+This captures what only Claude knows — reasoning, rejected approaches, conditionals — in a parseable format. The parser detects structured output (2+ section headers) and falls back to prose if Claude doesn't follow the template.
 
-- Original task (first user message)
-- Last 3 user messages (recent decisions)
-- Last assistant message (often contains the plan/next steps)
-- Git commits made during the session
-- Key commands and results (tests, builds)
+### Mechanical extraction
+
+Every handoff also includes structured data extracted mechanically from the JSONL transcript:
+
 - Files modified and read
+- Git commits (verbatim messages)
+- Key commands and results (builds, tests, deploys)
+- Recent user messages
+
+This data is deterministic — no LLM interpretation, no paraphrasing, no loss.
+
+### Why both?
+
+Research shows LLM-generated summaries lose ~84% of verifiable facts ([Size-Fidelity Paradox](https://arxiv.org/abs/2602.09789)). Mechanical extraction preserves files and commits perfectly but can't capture reasoning. The combined handoff achieves **~60% fact preservation** — 3x better than prose alone.
+
+```bash
+clauditor handoff-report   # measure your last handoff's preservation score
+```
+
+```
+  Handoff Quality
+  ────────────────────────────────────────────────────
+
+  Score:  58% (37/84 facts preserved)
+
+  Files modified       20/21  ███████████████████░
+  Commits                6/8  ███████████████░░░░░
+  Commands              6/36  ███░░░░░░░░░░░░░░░░░
+  Rejected approaches    0/2  ░░░░░░░░░░░░░░░░░░░░
+```
 
 ### Per-session storage
 
@@ -306,12 +347,12 @@ Each handoff is saved as a separate timestamped file:
 ~/.clauditor/sessions/<encoded-project-path>/<timestamp>.md
 ```
 
-Multiple sessions in the same project don't overwrite each other. Files older than 24h are cleaned up automatically. A legacy `~/.clauditor/last-session.md` is also written for backward compatibility.
+Multiple sessions in the same project don't overwrite each other. Files older than 24h are cleaned up automatically.
 
 ### Session resume flow
 
 1. clauditor blocks your session (or `/compact` fires)
-2. Context is saved to per-session file
+2. Context is saved — structured template + mechanical data
 3. You open a new session and type "continue"
 4. clauditor blocks with your saved sessions and copyable prompts
 5. You paste the prompt — Claude reads the file and picks up where you left off
@@ -320,13 +361,39 @@ Multiple sessions in the same project don't overwrite each other. Files older th
 
 clauditor learns from your sessions and builds per-project knowledge at `~/.clauditor/knowledge/<project>/`.
 
-**Error index** — Records failed commands and their fixes. When a command fails and later succeeds, clauditor remembers the fix. Next time Claude tries the same command, the `PreToolUse` hook injects the known fix before it runs.
+**Error index with confidence decay** — Records failed commands and their fixes. Each error has a confidence score (0–1) that decays with a 45-day half-life. Recent errors rank above old ones. Stale errors fade naturally instead of accumulating forever.
+
+```
+  npm run build          conf=0.85  (confirmed, 5x)
+  npx drizzle-kit push   conf=0.30  (inferred, 1x)
+```
+
+**Noise filtering** — Typo commands (`command not found`), transient network errors (`ETIMEDOUT`), and tiny error messages are filtered at capture time. Keeps the error index clean from day one.
+
+**Implicit outcome tracking** — When `PreToolUse` warns about a command and `PostToolUse` sees the result, confidence adjusts automatically. Command succeeded after warning? +0.1. Failed despite warning? -0.15. Self-correcting, zero effort.
+
+**Confidence tiers** — Errors are labeled `confirmed` (0.7+), `observed` (0.4+), `inferred` (0.2+), or `stale` (<0.2). Claude sees the tier in the injection, so it knows how much to trust each entry.
 
 **File tracker** — Tracks edit/read counts across sessions. Identifies "hot files" (5+ edits across 3+ sessions) and injects context when Claude touches them, so it knows the file's history.
 
 ```bash
 clauditor knowledge   # see accumulated errors and file activity
 ```
+
+## Team knowledge sync (optional)
+
+For teams, clauditor can optionally connect to a hub for shared knowledge:
+
+```bash
+clauditor team join --key <API_KEY> --hub-url https://your-hub.com
+```
+
+When connected:
+- **PreToolUse** queries the hub before Bash commands — team errors and fixes are shared
+- **PostToolUse** pushes error fragments to the hub and queries for file context
+- **SessionStart** pulls a compact team knowledge brief
+
+Knowledge starts as developer-scoped and auto-promotes to team-scoped when multiple developers report the same issue. No hub required for solo use — all local features work independently.
 
 ## Cross-project session handoffs
 
@@ -385,7 +452,7 @@ After 200 turns, the history alone can be 200k+ tokens. A fresh session resets t
 git clone https://github.com/IyadhKhalfallah/clauditor.git
 cd clauditor
 npm install
-npm test        # 211 tests
+npm test        # 275 tests
 npm run build
 npm link        # makes `clauditor` available globally
 ```
