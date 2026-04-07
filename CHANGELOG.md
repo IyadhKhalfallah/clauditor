@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.25.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.24.0...v1.25.0) (2026-04-07)
+
+
+### Features
+
+* handoff quality measurement — information loss scoring ([#92](https://github.com/IyadhKhalfallah/clauditor/issues/92)) ([ec2a5ec](https://github.com/IyadhKhalfallah/clauditor/commit/ec2a5ec709b7d69f322887a1e57a263371de6c15))
+* knowledge quality + optional hub sync ([#90](https://github.com/IyadhKhalfallah/clauditor/issues/90)) ([da0165f](https://github.com/IyadhKhalfallah/clauditor/commit/da0165f58687c16a2aa233de09e7d9ab496807ca))
+* secret scrubbing before hub push ([#97](https://github.com/IyadhKhalfallah/clauditor/issues/97)) ([a830f2c](https://github.com/IyadhKhalfallah/clauditor/commit/a830f2cd232136ecd7b4a693e9cc182d714b0042))
+* structured handoff template for session rotation ([#93](https://github.com/IyadhKhalfallah/clauditor/issues/93)) ([9c3d5f7](https://github.com/IyadhKhalfallah/clauditor/commit/9c3d5f727369a048601d113c5df8329cb46e683b))
+
+
+### Bug Fixes
+
+* extract reasoning only from work turns, not meta-discussion ([#94](https://github.com/IyadhKhalfallah/clauditor/issues/94)) ([adc738e](https://github.com/IyadhKhalfallah/clauditor/commit/adc738e4fb7e4101ff3688657f62d09f400f103e))
+* skip tiny transcripts in handoff-report auto-detection ([#95](https://github.com/IyadhKhalfallah/clauditor/issues/95)) ([138daf7](https://github.com/IyadhKhalfallah/clauditor/commit/138daf7ad385fcd55cfd03f14e48aab8697167eb))
+
 ## [1.24.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.23.0...v1.24.0) (2026-04-06)
 
 
