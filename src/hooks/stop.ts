@@ -143,7 +143,8 @@ function captureRotationHandoff(input: StopHookInput): void {
   } catch {}
 
   try {
-    savePostCompactSummary(msg, cwd)
+    // Don't await — stop hook should not block on async scoring
+    savePostCompactSummary(msg, cwd, input.transcript_path || null).catch(() => {})
 
     logActivity({
       type: 'context_warning',
