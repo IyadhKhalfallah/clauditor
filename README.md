@@ -229,7 +229,7 @@ Shows token costs by hour of day to detect if peak hours burn more quota:
 | `clauditor suggest-skill` | Find repeating workflows |
 | `clauditor knowledge` | Show accumulated errors and file activity |
 | `clauditor handoff-report` | Measure information preservation of last session handoff |
-| `clauditor team join` | Connect to a clauditor hub for team knowledge sharing |
+| `clauditor team join` | Connect to a clauditor hub for team knowledge sharing (beta) |
 
 ## Audit-only mode (no hooks)
 
@@ -380,7 +380,7 @@ clauditor learns from your sessions and builds per-project knowledge at `~/.clau
 clauditor knowledge   # see accumulated errors and file activity
 ```
 
-## Team knowledge sync (optional)
+## Team knowledge sync (optional, beta)
 
 For teams, clauditor can optionally connect to a hub for shared knowledge:
 
