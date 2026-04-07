@@ -36,7 +36,7 @@ describe('extractFacts', () => {
     const facts = extractFacts(path)
     const modified = facts.filter(f => f.category === 'file_modified')
     expect(modified.length).toBe(2)
-    expect(modified[0].weight).toBe(0.9)
+    expect(modified[0].weight).toBe(1)
   })
 
   it('extracts file reads with low weight, excludes modified files', () => {
@@ -61,7 +61,7 @@ describe('extractFacts', () => {
     const commits = extractFacts(path).filter(f => f.category === 'commit')
     expect(commits.length).toBe(1)
     expect(commits[0].value).toContain('improve Clerk contrast')
-    expect(commits[0].weight).toBe(0.8)
+    expect(commits[0].weight).toBe(1)
   })
 
   it('extracts errors from tool results', () => {
@@ -72,7 +72,7 @@ describe('extractFacts', () => {
     ])
     const errors = extractFacts(path).filter(f => f.category === 'error_hit')
     expect(errors.length).toBe(1)
-    expect(errors[0].weight).toBe(0.7)
+    expect(errors[0].weight).toBe(1)
   })
 
   it('extracts key commands (build, test, deploy)', () => {
@@ -85,42 +85,6 @@ describe('extractFacts', () => {
     ])
     const cmds = extractFacts(path).filter(f => f.category === 'command_run')
     expect(cmds.length).toBe(2)
-  })
-
-  it('extracts user preferences with highest weight', () => {
-    const path = writeTranscript('prefs.jsonl', [
-      { type: 'user', message: { content: [
-        { type: 'text', text: "don't add co-author lines to commits" },
-      ] } },
-    ])
-    const prefs = extractFacts(path).filter(f => f.category === 'user_preference')
-    expect(prefs.length).toBe(1)
-    expect(prefs[0].weight).toBe(1.0)
-  })
-
-  it('extracts rejected approaches with highest weight (Tang et al.)', () => {
-    const path = writeTranscript('rejected.jsonl', [
-      { type: 'assistant', message: { content: [
-        { type: 'text', text: 'I tried using inline styles but that didn\'t work because Clerk overrides them.' },
-        { type: 'tool_use', name: 'Edit', input: { file_path: 'src/app/layout.tsx' } },
-      ] } },
-    ])
-    const rejected = extractFacts(path).filter(f => f.category === 'approach_rejected')
-    expect(rejected.length).toBeGreaterThanOrEqual(1)
-    expect(rejected[0].weight).toBe(1.0)
-    expect(rejected.some(r => r.value.includes('inline styles'))).toBe(true)
-  })
-
-  it('extracts conditional relationships (Tang et al.)', () => {
-    const path = writeTranscript('cond.jsonl', [
-      { type: 'assistant', message: { content: [
-        { type: 'text', text: 'You need to run the database migrations before building the application successfully.' },
-        { type: 'tool_use', name: 'Bash', input: { command: 'npx drizzle-kit push' } },
-      ] } },
-    ])
-    const conds = extractFacts(path).filter(f => f.category === 'conditional')
-    expect(conds.length).toBe(1)
-    expect(conds[0].weight).toBe(0.9)
   })
 
   it('extracts temporal sequences from key commands', () => {
@@ -170,15 +134,15 @@ describe('scoreHandoff', () => {
     expect(score.lostFacts.length).toBe(2)
   })
 
-  it('weights high-importance facts more heavily', () => {
+  it('detects lost facts', () => {
     const facts: TranscriptFact[] = [
-      { category: 'user_preference', value: "don't add co-author lines to commits please", weight: 1.0 },
-      { category: 'file_read', value: 'readme.md', weight: 0.3 },
+      { category: 'commit', value: 'feat: add authentication flow', weight: 1 },
+      { category: 'file_read', value: 'readme.md', weight: 1 },
     ]
     const summary = 'Read readme.md for project setup'
     const score = scoreHandoff(facts, summary)
-    expect(score.score).toBeLessThan(0.5)
-    expect(score.lostFacts[0].category).toBe('user_preference')
+    expect(score.score).toBe(0.5)
+    expect(score.lostFacts[0].category).toBe('commit')
   })
 
   it('provides per-category breakdown', () => {
@@ -194,14 +158,6 @@ describe('scoreHandoff', () => {
     expect(score.categories['commit'].preserved).toBe(1)
   })
 
-  it('detects preserved approach rejections', () => {
-    const facts: TranscriptFact[] = [
-      { category: 'approach_rejected', value: 'tried inline styles but Clerk overrides them', weight: 1.0 },
-    ]
-    const summary = 'Attempted inline styles approach but Clerk overrides prevented it from working'
-    const score = scoreHandoff(facts, summary)
-    expect(score.score).toBe(1)
-  })
 
   it('detects temporal sequence preservation (correct order)', () => {
     const facts: TranscriptFact[] = [
@@ -281,21 +237,6 @@ describe('detectInformationLoss', () => {
     expect(signals.rediscoveryTurns).toBe(2)
   })
 
-  it('detects user corrections indicating lost context', () => {
-    const newPath = writeTranscript('corrections.jsonl', [
-      { type: 'user', message: { content: [
-        { type: 'text', text: 'I already told you, we use drizzle not prisma' },
-      ] } },
-      { type: 'user', message: { content: [
-        { type: 'text', text: 'we already tried that approach and it failed' },
-      ] } },
-      { type: 'user', message: { content: [
-        { type: 'text', text: 'Can you help me with the layout?' },
-      ] } },
-    ])
-    const signals = detectInformationLoss([], newPath)
-    expect(signals.userCorrections.length).toBe(2)
-  })
 
   it('zero re-discovery when first action is an edit', () => {
     const newPath = writeTranscript('immediate.jsonl', [
@@ -314,9 +255,8 @@ describe('generateReport', () => {
   it('generates report with score and categories', () => {
     const score = scoreHandoff(
       [
-        { category: 'file_modified', value: 'layout.tsx', weight: 0.9 },
-        { category: 'user_preference', value: "don't add co-author lines", weight: 1.0 },
-        { category: 'approach_rejected', value: 'tried inline styles', weight: 1.0 },
+        { category: 'file_modified', value: 'layout.tsx', weight: 1 },
+        { category: 'commit', value: 'feat: add auth', weight: 1 },
       ],
       'Modified layout.tsx file'
     )
@@ -324,13 +264,11 @@ describe('generateReport', () => {
       redundantReads: ['config.ts'],
       rediscoveryTurns: 3,
       repeatedErrors: [],
-      userCorrections: ['I already told you about the co-author rule'],
     })
-    expect(report).toContain('Handoff Quality')
+    expect(report).toContain('Structural Coverage')
     expect(report).toContain('Score')
     expect(report).toContain('Files modified')
     expect(report).toContain('Redundant reads')
-    expect(report).toContain('Corrections')
   })
 
   it('includes overwrite and drift warnings when detected', () => {
