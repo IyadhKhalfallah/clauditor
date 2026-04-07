@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { scrubSecrets } from './secret-scrubber.js'
 
 function clauditorDir(): string {
   return resolve(homedir(), '.clauditor')
@@ -114,25 +115,29 @@ export function recordError(cwd: string, command: string, error: string): void {
   // Noise filtering — don't record transient/typo errors
   if (isNoiseError(truncatedError)) return
 
+  // Scrub secrets from command and error before storing locally
+  const scrubbedCommand = scrubSecrets(command.slice(0, 200)).scrubbed
+  const scrubbedError = scrubSecrets(truncatedError).scrubbed
+
   const errors = readErrorIndex(cwd)
   const baseCmd = extractBaseCommand(command)
 
   const existing = errors.find(e =>
     extractBaseCommand(e.command) === baseCmd &&
-    similarError(e.error, truncatedError)
+    similarError(e.error, scrubbedError)
   )
 
   if (existing) {
     existing.occurrences++
     existing.lastSeen = today()
     existing.lastErrorMs = Date.now()
-    existing.error = truncatedError
+    existing.error = scrubbedError
     // Confidence boost: recurring errors are more trustworthy
     existing.confidence = Math.min(1.0, existing.confidence + 0.05)
   } else {
     errors.push({
-      command: command.slice(0, 200),
-      error: truncatedError,
+      command: scrubbedCommand,
+      error: scrubbedError,
       fix: null,
       occurrences: 1,
       firstSeen: today(),
@@ -166,7 +171,7 @@ export function recordFix(cwd: string, command: string): void {
 
   if (!unfixed) return
 
-  unfixed.fix = command.slice(0, 200)
+  unfixed.fix = scrubSecrets(command.slice(0, 200)).scrubbed
   unfixed.confidence = Math.min(1.0, unfixed.confidence + 0.15) // significant boost
   writeErrors(cwd, errors)
 }
