@@ -6,11 +6,25 @@ import { readStdin, outputDecision } from './shared.js'
 import { findKnownError } from '../features/error-index.js'
 
 // Rate limit: only inject once per unique base command per session.
-// Persisted to disk because each hook invocation is a separate process.
-const RATE_LIMIT_FILE = resolve(homedir(), '.clauditor', 'pretool-injected.json')
+function rateLimitFile(): string {
+  return resolve(homedir(), '.clauditor', 'pretool-injected.json')
+}
+
+// Outcome tracking: when PreToolUse injects a warning, record it so
+// PostToolUse can check if the command succeeded/failed and adjust confidence.
+function outcomeStateFile(): string {
+  return resolve(homedir(), '.clauditor', 'pretool-outcome-pending.json')
+}
+
+export interface OutcomePending {
+  command: string
+  baseCommand: string
+  timestamp: number
+  hubEntryIds?: string[]
+}
 
 function readInjected(): Record<string, boolean> {
-  try { return JSON.parse(readFileSync(RATE_LIMIT_FILE, 'utf-8')) } catch { return {} }
+  try { return JSON.parse(readFileSync(rateLimitFile(), 'utf-8')) } catch { return {} }
 }
 
 function markInjected(key: string): void {
@@ -18,8 +32,33 @@ function markInjected(key: string): void {
   data[key] = true
   try {
     mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-    writeFileSync(RATE_LIMIT_FILE, JSON.stringify(data))
+    writeFileSync(rateLimitFile(), JSON.stringify(data))
   } catch {}
+}
+
+/** Write outcome-pending state so PostToolUse can track the result. */
+function setOutcomePending(pending: OutcomePending): void {
+  try {
+    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+    writeFileSync(outcomeStateFile(), JSON.stringify(pending))
+  } catch {}
+}
+
+export function readOutcomePending(): OutcomePending | null {
+  try {
+    const data = JSON.parse(readFileSync(outcomeStateFile(), 'utf-8'))
+    // Must have required fields
+    if (!data.command || !data.timestamp) return null
+    // Expire after 5 minutes
+    if (Date.now() - data.timestamp > 5 * 60 * 1000) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
+export function clearOutcomePending(): void {
+  try { writeFileSync(outcomeStateFile(), '{}') } catch {}
 }
 
 /**
@@ -47,13 +86,17 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
   const parts: string[] = []
 
   // 1. Local error index check (free, offline, instant)
+  let injectedWarning = false
+  const baseCommand = command.split(/\s+/).slice(0, 2).join(' ')
+
   if (input.cwd) {
-    const key = `${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
+    const key = `${input.session_id}:${baseCommand}`
     const injected = readInjected()
     if (!injected[key]) {
       const knownError = findKnownError(input.cwd, command)
       if (knownError) {
         markInjected(key)
+        injectedWarning = true
         let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
         context += `Last error: ${knownError.error.slice(0, 150)}`
         if (knownError.fix) {
@@ -65,8 +108,10 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
   }
 
   // 2. Hub contextual query (team-wide knowledge, if configured)
+  let hubEntryIds: string[] = []
+
   if (input.cwd) {
-    const hubKey = `hub:${input.session_id}:${command.split(/\s+/).slice(0, 2).join(' ')}`
+    const hubKey = `hub:${input.session_id}:${baseCommand}`
     const injected = readInjected()
     if (!injected[hubKey]) {
       try {
@@ -76,6 +121,8 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
           const result = await queryKnowledge(hub.projectHash, 'command', command, hub.config)
           if (result.entries.length > 0) {
             markInjected(hubKey)
+            injectedWarning = true
+            hubEntryIds = result.entries.map((e) => e.id)
             const lines = result.entries.map((e) => {
               const body = e.body as Record<string, string>
               if (e.entry_type === 'error_fix') {
@@ -87,7 +134,7 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
               return `- **${e.title}** (${e.entry_type})`
             })
             parts.push(
-              `[clauditor hub — team knowledge for \`${command.split(/\s+/).slice(0, 2).join(' ')}\`]:\n` +
+              `[clauditor hub — team knowledge for \`${baseCommand}\`]:\n` +
               lines.join('\n')
             )
           }
@@ -96,6 +143,16 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
         // Hub unavailable — local check is enough
       }
     }
+  }
+
+  // 3. Set outcome-pending state so PostToolUse can track the result
+  if (injectedWarning) {
+    setOutcomePending({
+      command,
+      baseCommand,
+      timestamp: Date.now(),
+      hubEntryIds: hubEntryIds.length > 0 ? hubEntryIds : undefined,
+    })
   }
 
   if (parts.length === 0) return {}

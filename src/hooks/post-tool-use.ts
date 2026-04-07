@@ -3,7 +3,8 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
-import { recordError, recordFix } from '../features/error-index.js'
+import { recordError, recordFix, recordOutcome, extractBaseCommand } from '../features/error-index.js'
+import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
 import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
@@ -113,6 +114,38 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
         type: 'error',
         content: { command: command.slice(0, 200), error_message: toolResponse.slice(0, 500) },
       }])
+    }
+
+    // 1c. Implicit outcome tracking — did a PreToolUse warning lead to success or failure?
+    if (cwd && command) {
+      try {
+        const pending = readOutcomePending()
+        if (pending && extractBaseCommand(command) === extractBaseCommand(pending.command)) {
+          const isError = !!errorGuidance
+          const outcome = isError ? 'negative' : 'positive'
+
+          // Update local confidence
+          recordOutcome(cwd, command, outcome)
+
+          // Push outcome to hub if entry IDs are available
+          if (pending.hubEntryIds && pending.hubEntryIds.length > 0) {
+            hubPushes.push((async () => {
+              try {
+                const { resolveHubContext } = await import('../hub/client.js')
+                const hub = resolveHubContext(cwd)
+                if (!hub) return
+                await fetch(`${hub.config.url}/api/v1/knowledge/outcome`, {
+                  method: 'POST',
+                  headers: { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ entry_ids: pending.hubEntryIds, outcome }),
+                })
+              } catch {}
+            })())
+          }
+
+          clearOutcomePending()
+        }
+      } catch {}
     }
   }
 
