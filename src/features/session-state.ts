@@ -173,8 +173,49 @@ export async function savePostCompactSummary(
       }
     }
 
-    // Claude's prose summary
-    sections.push(``, `## Session Summary`, ``, summary.trim(), ``)
+    // Parse Claude's structured handoff sections (if it followed the template)
+    // Falls back to raw prose if template wasn't followed
+    const parsed = parseStructuredHandoff(summary)
+
+    if (parsed.isStructured) {
+      if (parsed.task) sections.push(``, `## Task`, parsed.task)
+      if (parsed.completed.length > 0) {
+        sections.push(``, `## Completed`)
+        for (const item of parsed.completed) sections.push(`- ${item}`)
+      }
+      if (parsed.inProgress.length > 0) {
+        sections.push(``, `## In Progress`)
+        for (const item of parsed.inProgress) sections.push(`- ${item}`)
+      }
+      if (parsed.failedApproaches.length > 0) {
+        sections.push(``, `## Failed Approaches`)
+        for (const item of parsed.failedApproaches) sections.push(`- ${item}`)
+      }
+      if (parsed.dependencies.length > 0) {
+        sections.push(``, `## Dependencies`)
+        for (const item of parsed.dependencies) sections.push(`- ${item}`)
+      }
+      if (parsed.decisions.length > 0) {
+        sections.push(``, `## Decisions`)
+        for (const item of parsed.decisions) sections.push(`- ${item}`)
+      }
+      if (parsed.userPreferences.length > 0) {
+        sections.push(``, `## User Preferences`)
+        for (const item of parsed.userPreferences) sections.push(`- ${item}`)
+      }
+      if (parsed.blockers.length > 0) {
+        sections.push(``, `## Blockers`)
+        for (const item of parsed.blockers) sections.push(`- ${item}`)
+      }
+      if (parsed.remainder) {
+        sections.push(``, `## Additional Context`, parsed.remainder)
+      }
+    } else {
+      // Unstructured — use Claude's prose as-is
+      sections.push(``, `## Session Summary`, ``, summary.trim())
+    }
+
+    sections.push(``)
 
     const content = sections.join('\n')
 
@@ -557,6 +598,118 @@ export function extractSessionStateFromTranscript(
   } catch {
     return null
   }
+}
+
+// ─── Structured Handoff Parser ──────────────────────────────
+
+interface ParsedHandoff {
+  isStructured: boolean
+  task: string | null
+  completed: string[]
+  inProgress: string[]
+  failedApproaches: string[]
+  dependencies: string[]
+  decisions: string[]
+  userPreferences: string[]
+  blockers: string[]
+  remainder: string | null
+}
+
+const SECTION_HEADERS: Record<string, keyof ParsedHandoff> = {
+  'TASK:': 'task',
+  'COMPLETED:': 'completed',
+  'IN_PROGRESS:': 'inProgress',
+  'FAILED_APPROACHES:': 'failedApproaches',
+  'DEPENDENCIES:': 'dependencies',
+  'DECISIONS:': 'decisions',
+  'USER_PREFERENCES:': 'userPreferences',
+  'BLOCKERS:': 'blockers',
+}
+
+/**
+ * Parse Claude's structured handoff output.
+ * If at least 2 recognized sections are found, treat as structured.
+ * Otherwise fall back to unstructured prose.
+ */
+export function parseStructuredHandoff(text: string): ParsedHandoff {
+  const result: ParsedHandoff = {
+    isStructured: false,
+    task: null,
+    completed: [],
+    inProgress: [],
+    failedApproaches: [],
+    dependencies: [],
+    decisions: [],
+    userPreferences: [],
+    blockers: [],
+    remainder: null,
+  }
+
+  // Find which sections are present
+  const headerEntries = Object.entries(SECTION_HEADERS)
+  const foundHeaders = headerEntries.filter(([header]) =>
+    text.includes(header)
+  )
+
+  // Need at least 2 sections to consider it structured
+  if (foundHeaders.length < 2) {
+    return result
+  }
+
+  result.isStructured = true
+
+  // Split text into sections by header
+  const lines = text.split('\n')
+  let currentSection: keyof ParsedHandoff | null = null
+  const remainderLines: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    // Check if this line starts a new section
+    const matchedHeader = headerEntries.find(([header]) =>
+      trimmed.startsWith(header)
+    )
+
+    if (matchedHeader) {
+      const [header, field] = matchedHeader
+      currentSection = field
+
+      // TASK: is a single-line field — value is on the same line
+      if (field === 'task') {
+        const value = trimmed.slice(header.length).trim()
+        if (value) result.task = value
+      }
+      continue
+    }
+
+    if (!currentSection) {
+      // Lines before any section header — or outside sections
+      if (trimmed && !trimmed.startsWith('[clauditor') && !trimmed.includes('tokens/turn')) {
+        remainderLines.push(trimmed)
+      }
+      continue
+    }
+
+    // Collect bullet items for list sections
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      const item = trimmed.slice(2).trim()
+      if (item && currentSection !== 'task') {
+        const arr = result[currentSection]
+        if (Array.isArray(arr)) {
+          arr.push(item)
+        }
+      }
+    } else if (trimmed && currentSection === 'task' && !result.task) {
+      result.task = trimmed
+    }
+  }
+
+  if (remainderLines.length > 0) {
+    result.remainder = remainderLines.join('\n').trim() || null
+  }
+
+  return result
 }
 
 /**

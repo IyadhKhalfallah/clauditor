@@ -605,8 +605,15 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
       `IMPORTANT — Before stopping, do these two things:\n` +
       `1. Tell the user: this session is burning ${wasteFactor}x more quota than necessary. ` +
       `Their progress is saved. Run \`claude\` to start fresh at ~${Math.round(baseline / 1000)}k tokens/turn instead of ${Math.round(current / 1000)}k.\n` +
-      `2. Write a brief summary of where you are: current task, what's done, what's next, any blockers. ` +
-      `Include this in your response so the user can paste it into the next session if needed.\n` +
+      `2. Write your handoff using EXACTLY this format (clauditor parses these sections to preserve context for the next session):\n\n` +
+      `TASK: (one line — what you were working on)\n\n` +
+      `COMPLETED:\n- (what's done, one bullet per item)\n\n` +
+      `IN_PROGRESS:\n- (what's partially done, include file paths and specific state)\n\n` +
+      `FAILED_APPROACHES:\n- (what was tried and didn't work, and WHY — this prevents the next session from repeating mistakes)\n\n` +
+      `DEPENDENCIES:\n- (things that must happen in order, e.g. "run migrations before build")\n\n` +
+      `DECISIONS:\n- (choices made and why, e.g. "chose X over Y because Z")\n\n` +
+      `USER_PREFERENCES:\n- (anything the user explicitly asked for or rejected)\n\n` +
+      `BLOCKERS:\n- (unresolved issues, things that need user input)\n\n` +
       `3. In the new session, tell the user to just say "continue where I left off" — clauditor will inject the saved context automatically.\n` +
       `4. Include the marker [clauditor-rotation] at the end of your response so clauditor can capture your summary.`,
   }
