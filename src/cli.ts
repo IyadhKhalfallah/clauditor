@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { cosmiconfig } from 'cosmiconfig'
 import { DEFAULT_CONFIG } from './types.js'
 import type { ClauditorConfig } from './types.js'
@@ -1146,6 +1147,79 @@ if (!isHook) {
     }
   } catch {}
 }
+
+// ─── clauditor handoff-report ────────────────────────────────────
+
+program
+  .command('handoff-report')
+  .description('Measure information preservation of the last session handoff')
+  .option('-t, --transcript <path>', 'Path to a specific transcript JSONL file')
+  .option('-s, --summary <path>', 'Path to a specific handoff summary file')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs')
+    const { extractFacts, scoreHandoff, generateReport } = await import('./features/handoff-quality.js')
+    const { readRecentHandoffs } = await import('./features/session-state.js')
+
+    // Find transcript
+    let transcriptPath = options.transcript
+    if (!transcriptPath) {
+      // Auto-detect: find the most recent transcript in ~/.claude/projects/
+      const claudeDir = resolve(homedir(), '.claude', 'projects')
+      try {
+        const projectDirs = readdirSync(claudeDir, { withFileTypes: true })
+          .filter(d => d.isDirectory())
+        let newest: { path: string; mtime: number } | null = null
+        for (const dir of projectDirs) {
+          const dirPath = resolve(claudeDir, dir.name)
+          try {
+            const files = readdirSync(dirPath).filter(f => f.endsWith('.jsonl'))
+            for (const f of files) {
+              const fp = resolve(dirPath, f)
+              const st = statSync(fp)
+              if (!newest || st.mtimeMs > newest.mtime) {
+                newest = { path: fp, mtime: st.mtimeMs }
+              }
+            }
+          } catch {}
+        }
+        if (newest) transcriptPath = newest.path
+      } catch {}
+    }
+
+    if (!transcriptPath) {
+      console.error('No transcript found. Specify one with --transcript <path>')
+      process.exit(1)
+    }
+
+    // Find handoff summary
+    let summaryContent: string
+    if (options.summary) {
+      summaryContent = readFileSync(options.summary, 'utf-8')
+    } else {
+      const handoffs = readRecentHandoffs()
+      if (handoffs.length === 0) {
+        console.error('No recent handoff found. Specify one with --summary <path>')
+        process.exit(1)
+      }
+      summaryContent = handoffs[0].content
+    }
+
+    // Extract and score
+    const facts = extractFacts(transcriptPath)
+    if (facts.length === 0) {
+      console.log('No verifiable facts found in the transcript.')
+      return
+    }
+
+    const score = scoreHandoff(facts, summaryContent)
+
+    if (options.json) {
+      console.log(JSON.stringify({ ...score, transcriptPath }, null, 2))
+    } else {
+      console.log(generateReport(score))
+    }
+  })
 
 // Default command: if no subcommand given, run `report`
 if (process.argv.length <= 2) {

@@ -20,6 +20,7 @@ export async function handlePostCompactHook(): Promise<void> {
     hook_event_name: string
     trigger?: string
     compact_summary?: string
+    transcript_path?: string
   }
 
   try {
@@ -36,7 +37,7 @@ export async function handlePostCompactHook(): Promise<void> {
   }
 
   try {
-    savePostCompactSummary(summary, hookInput.cwd || null)
+    await savePostCompactSummary(summary, hookInput.cwd || null, hookInput.transcript_path || null)
 
     logActivity({
       type: 'context_warning',
