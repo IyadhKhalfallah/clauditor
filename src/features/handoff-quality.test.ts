@@ -309,7 +309,7 @@ describe('detectInformationLoss', () => {
 // ─── generateReport ─────────────────────────────────────────
 
 describe('generateReport', () => {
-  it('generates report with all sections', () => {
+  it('generates report with score and categories', () => {
     const score = scoreHandoff(
       [
         { category: 'file_modified', value: 'layout.tsx', weight: 0.9 },
@@ -324,15 +324,14 @@ describe('generateReport', () => {
       repeatedErrors: [],
       userCorrections: ['I already told you about the co-author rule'],
     })
-    expect(report).toContain('Handoff Quality Report')
-    expect(report).toContain('Information preservation')
-    expect(report).toContain('user_preference')
-    expect(report).toContain('approach_rejected')
-    expect(report).toContain('Redundant file reads: 1')
-    expect(report).toContain('User corrections')
+    expect(report).toContain('Handoff Quality')
+    expect(report).toContain('Score')
+    expect(report).toContain('Files modified')
+    expect(report).toContain('Redundant reads')
+    expect(report).toContain('Corrections')
   })
 
-  it('includes overwrite and drift sections when detected', () => {
+  it('includes overwrite and drift warnings when detected', () => {
     const score = {
       totalFacts: 2,
       preservedFacts: 1,
@@ -351,8 +350,7 @@ describe('generateReport', () => {
       }],
     }
     const report = generateReport(score)
-    expect(report).toContain('Knowledge overwriting detected')
-    expect(report).toContain('Size-Fidelity Paradox')
-    expect(report).toContain('Semantic drift detected')
+    expect(report).toContain('overwriting')
+    expect(report).toContain('drift')
   })
 })

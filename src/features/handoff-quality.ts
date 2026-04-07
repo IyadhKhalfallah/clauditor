@@ -563,70 +563,122 @@ export function detectInformationLoss(
 
 // ─── Report Generation ──────────────────────────────────────
 
+// ANSI color helpers
+const c = {
+  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
+  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
+  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
+  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
+  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
+  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
+}
+
+function scoreColor(pct: number): (s: string) => string {
+  if (pct >= 70) return c.green
+  if (pct >= 40) return c.yellow
+  return c.red
+}
+
+function bar(preserved: number, total: number, width = 20): string {
+  if (total === 0) return c.dim('─'.repeat(width))
+  const filled = Math.round((preserved / total) * width)
+  const empty = width - filled
+  const pct = Math.round((preserved / total) * 100)
+  const colorFn = scoreColor(pct)
+  return colorFn('█'.repeat(filled)) + c.dim('░'.repeat(empty))
+}
+
 export function generateReport(score: HandoffScore, signals?: NewSessionSignals): string {
-  const lines: string[] = [
-    `## Handoff Quality Report`,
-    ``,
-    `**Information preservation: ${(score.score * 100).toFixed(0)}%** (${score.preservedFacts}/${score.totalFacts} facts)`,
-    ``,
+  const pct = Math.round(score.score * 100)
+  const colorFn = scoreColor(pct)
+  const lines: string[] = []
+
+  lines.push(`  Handoff Quality`)
+  lines.push(`  ${'─'.repeat(52)}`)
+  lines.push(``)
+  lines.push(`  Score:  ${colorFn(`${pct}%`)} ${c.dim(`(${score.preservedFacts}/${score.totalFacts} facts preserved)`)}`)
+  lines.push(``)
+
+  // Category breakdown table
+  const categoryLabels: Record<string, string> = {
+    user_preference: 'Preferences',
+    approach_rejected: 'Rejected approaches',
+    conditional: 'Conditionals',
+    file_modified: 'Files modified',
+    error_fixed: 'Errors fixed',
+    error_hit: 'Errors hit',
+    commit: 'Commits',
+    temporal_sequence: 'Execution order',
+    command_run: 'Commands',
+    file_read: 'Files read',
+  }
+
+  const categoryOrder: FactCategory[] = [
+    'file_modified', 'commit', 'file_read', 'command_run',
+    'error_hit', 'error_fixed',
+    'user_preference', 'approach_rejected', 'conditional',
+    'temporal_sequence',
   ]
 
-  lines.push(`### By category`)
-  const categoryOrder: FactCategory[] = [
-    'user_preference', 'approach_rejected', 'conditional',
-    'file_modified', 'error_fixed', 'error_hit', 'commit',
-    'temporal_sequence', 'command_run', 'file_read',
-  ]
   for (const cat of categoryOrder) {
     const data = score.categories[cat]
     if (!data) continue
-    const pct = data.total > 0 ? ((data.preserved / data.total) * 100).toFixed(0) : '—'
-    const icon = data.preserved === data.total ? '✓' : data.preserved === 0 ? '✗' : '△'
-    lines.push(`- ${icon} **${cat}**: ${data.preserved}/${data.total} (${pct}%)`)
+    const label = (categoryLabels[cat] || cat).padEnd(20)
+    const ratio = `${data.preserved}/${data.total}`.padStart(5)
+    lines.push(`  ${label} ${ratio}  ${bar(data.preserved, data.total)}`)
+  }
+
+  // Warnings
+  if (score.driftDetections.length > 0) {
+    lines.push(``)
+    lines.push(`  ${c.yellow('⚠')} Semantic drift — execution order changed in summary`)
   }
 
   if (score.overwriteDetections.length > 0) {
-    lines.push(``, `### Knowledge overwriting detected`)
-    lines.push(`> The summary replaced specific facts with "expected" versions (Size-Fidelity Paradox)`)
-    for (const d of score.overwriteDetections.slice(0, 5)) {
-      lines.push(`- Original: "${d.originalFact.slice(0, 60)}"`)
-      lines.push(`  Summary: "${d.summaryVersion.slice(0, 60)}"`)
+    lines.push(`  ${c.yellow('⚠')} Knowledge overwriting — ${score.overwriteDetections.length} fact(s) altered`)
+  }
+
+  // Key losses (only high-weight)
+  const criticalLosses = score.lostFacts
+    .filter(f => f.weight >= 0.8)
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 5)
+
+  if (criticalLosses.length > 0) {
+    lines.push(``)
+    lines.push(`  ${c.bold('Lost')} ${c.dim('(high-importance facts not in handoff)')}`)
+    for (const f of criticalLosses) {
+      const label = (categoryLabels[f.category] || f.category).slice(0, 12)
+      lines.push(`  ${c.dim(label.padEnd(13))} ${f.value.slice(0, 55)}`)
     }
   }
 
-  if (score.driftDetections.length > 0) {
-    lines.push(``, `### Semantic drift detected`)
-    lines.push(`> The summary changed the order of operations`)
-    for (const d of score.driftDetections.slice(0, 3)) {
-      lines.push(`- ${d.description}`)
-      lines.push(`  Actual: ${d.originalOrder.join(' → ')}`)
-      lines.push(`  Summary: ${d.summaryOrder.join(' → ')}`)
-    }
-  }
-
-  if (score.lostFacts.length > 0) {
-    const important = score.lostFacts
-      .sort((a, b) => b.weight - a.weight)
-      .slice(0, 10)
-    lines.push(``, `### Key information lost`)
-    for (const f of important) {
-      lines.push(`- [${f.category}] ${f.value.slice(0, 80)}`)
-    }
-  }
-
+  // New session impact signals
   if (signals) {
-    lines.push(``, `### New session impact`)
-    lines.push(`- Redundant file reads: ${signals.redundantReads.length}`)
-    lines.push(`- Re-discovery turns before first edit: ${signals.rediscoveryTurns}`)
-    lines.push(`- Repeated errors (already fixed): ${signals.repeatedErrors.length}`)
-    lines.push(`- User corrections ("I already told you..."): ${signals.userCorrections.length}`)
-    if (signals.userCorrections.length > 0) {
-      for (const c of signals.userCorrections.slice(0, 3)) {
-        lines.push(`  > "${c.slice(0, 80)}"`)
+    const hasImpact = signals.redundantReads.length > 0 ||
+      signals.rediscoveryTurns > 0 ||
+      signals.repeatedErrors.length > 0 ||
+      signals.userCorrections.length > 0
+
+    if (hasImpact) {
+      lines.push(``)
+      lines.push(`  ${c.bold('Impact on next session')}`)
+      if (signals.redundantReads.length > 0) {
+        lines.push(`  ${c.dim('Redundant reads:')}  ${signals.redundantReads.length} files re-read`)
+      }
+      if (signals.rediscoveryTurns > 0) {
+        lines.push(`  ${c.dim('Re-discovery:')}     ${signals.rediscoveryTurns} turns before first edit`)
+      }
+      if (signals.repeatedErrors.length > 0) {
+        lines.push(`  ${c.red('Repeated errors:')} ${signals.repeatedErrors.length} already-fixed errors hit again`)
+      }
+      if (signals.userCorrections.length > 0) {
+        lines.push(`  ${c.yellow('Corrections:')}     ${signals.userCorrections.length} times user said "I already told you..."`)
       }
     }
   }
 
+  lines.push(``)
   return lines.join('\n')
 }
 
