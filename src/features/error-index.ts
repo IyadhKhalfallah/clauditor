@@ -1,10 +1,58 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { resolve, basename } from 'node:path'
+import { resolve } from 'node:path'
 
 function clauditorDir(): string {
   return resolve(homedir(), '.clauditor')
 }
+
+// ─── Confidence & Decay ─────────────────────────────────────
+
+const ERROR_HALF_LIFE_DAYS = 45
+const MIN_CONFIDENCE = 0.05
+const DECAY_ARCHIVE_THRESHOLD = 0.1
+
+/** Noise patterns — transient errors that shouldn't be recorded. */
+const NOISE_PATTERNS = [
+  /command not found/i,
+  /Unknown command/i,
+  /not recognized as/i,
+  /ETIMEDOUT/i,
+  /ECONNRESET/i,
+  /ECONNREFUSED.*localhost/i,
+]
+
+/**
+ * Calculate effective confidence after temporal decay.
+ * Half-life: 45 days for errors (version-dependent, go stale fast).
+ */
+export function effectiveConfidence(baseConfidence: number, lastSeenAt: string): number {
+  const lastDate = new Date(lastSeenAt)
+  if (isNaN(lastDate.getTime())) return baseConfidence
+  const daysSince = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24)
+  const decayFactor = Math.pow(0.5, daysSince / ERROR_HALF_LIFE_DAYS)
+  return Math.max(MIN_CONFIDENCE, baseConfidence * decayFactor)
+}
+
+/**
+ * Compute confidence tier label for display.
+ */
+export function confidenceTier(effective: number): 'confirmed' | 'observed' | 'inferred' | 'stale' {
+  if (effective >= 0.7) return 'confirmed'
+  if (effective >= 0.4) return 'observed'
+  if (effective >= 0.2) return 'inferred'
+  return 'stale'
+}
+
+/**
+ * Check if an error message is transient noise.
+ */
+export function isNoiseError(errorMessage: string): boolean {
+  if (errorMessage.length < 10) return true
+  return NOISE_PATTERNS.some((p) => p.test(errorMessage))
+}
+
+// ─── Data Types ─────────────────────────────────────────────
 
 export interface ErrorEntry {
   command: string
@@ -15,11 +63,12 @@ export interface ErrorEntry {
   lastSeen: string
   /** Timestamp of the most recent occurrence (ms since epoch) */
   lastErrorMs?: number
+  /** Base confidence (0-1). Increases with occurrences and successful fixes. */
+  confidence: number
 }
 
-/**
- * Get the knowledge directory for a project.
- */
+// ─── Storage ────────────────────────────────────────────────
+
 function getKnowledgeDir(cwd: string): string {
   const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 100)
   return resolve(clauditorDir(), 'knowledge', encoded)
@@ -29,26 +78,45 @@ function getErrorsPath(cwd: string): string {
   return resolve(getKnowledgeDir(cwd), 'errors.json')
 }
 
-/**
- * Read the error index for a project.
- */
 export function readErrorIndex(cwd: string): ErrorEntry[] {
   try {
-    return JSON.parse(readFileSync(getErrorsPath(cwd), 'utf-8'))
+    const raw = JSON.parse(readFileSync(getErrorsPath(cwd), 'utf-8'))
+    // Backfill confidence for legacy entries
+    return raw.map((e: ErrorEntry) => ({
+      ...e,
+      confidence: e.confidence ?? confidenceFromOccurrences(e.occurrences, !!e.fix),
+    }))
   } catch {
     return []
   }
 }
 
 /**
+ * Derive initial confidence from occurrence count (for legacy entries without confidence field).
+ */
+function confidenceFromOccurrences(occurrences: number, hasFix: boolean): number {
+  let c = 0.3
+  if (occurrences >= 2) c = 0.5
+  if (occurrences >= 5) c = 0.7
+  if (hasFix) c = Math.min(1.0, c + 0.1)
+  return c
+}
+
+// ─── Recording ──────────────────────────────────────────────
+
+/**
  * Record a failed command. Called from PostToolUse when Bash fails.
+ * Skips noise errors (typos, transient network issues).
  */
 export function recordError(cwd: string, command: string, error: string): void {
-  const errors = readErrorIndex(cwd)
-  const baseCmd = extractBaseCommand(command)
   const truncatedError = error.slice(0, 200)
 
-  // Find existing entry with same base command and similar error
+  // Noise filtering — don't record transient/typo errors
+  if (isNoiseError(truncatedError)) return
+
+  const errors = readErrorIndex(cwd)
+  const baseCmd = extractBaseCommand(command)
+
   const existing = errors.find(e =>
     extractBaseCommand(e.command) === baseCmd &&
     similarError(e.error, truncatedError)
@@ -59,6 +127,8 @@ export function recordError(cwd: string, command: string, error: string): void {
     existing.lastSeen = today()
     existing.lastErrorMs = Date.now()
     existing.error = truncatedError
+    // Confidence boost: recurring errors are more trustworthy
+    existing.confidence = Math.min(1.0, existing.confidence + 0.05)
   } else {
     errors.push({
       command: command.slice(0, 200),
@@ -68,6 +138,7 @@ export function recordError(cwd: string, command: string, error: string): void {
       firstSeen: today(),
       lastSeen: today(),
       lastErrorMs: Date.now(),
+      confidence: 0.3, // inferred — single occurrence
     })
   }
 
@@ -75,19 +146,15 @@ export function recordError(cwd: string, command: string, error: string): void {
 }
 
 /**
- * Record a fix for a recent error. Called from PostToolUse when a command
- * succeeds after a recent failure with the same binary.
- *
- * Only records if the error occurred within the last 60 seconds (proximity check).
+ * Record a fix for a recent error. Boosts confidence.
  */
-const FIX_PROXIMITY_MS = 60_000
+const FIX_PROXIMITY_MS = 120_000 // 2 minutes (was 60s — too tight)
 
 export function recordFix(cwd: string, command: string): void {
   const errors = readErrorIndex(cwd)
   const baseCmd = extractBaseCommand(command)
   const now = Date.now()
 
-  // Find the most recent unfixed error with the same base command, within 60s
   const unfixed = errors
     .filter(e =>
       extractBaseCommand(e.command) === baseCmd &&
@@ -100,32 +167,90 @@ export function recordFix(cwd: string, command: string): void {
   if (!unfixed) return
 
   unfixed.fix = command.slice(0, 200)
+  unfixed.confidence = Math.min(1.0, unfixed.confidence + 0.15) // significant boost
   writeErrors(cwd, errors)
 }
 
 /**
- * Look up known errors for a command. Used by PreToolUse.
+ * Record an outcome for a known error.
+ * Called by PostToolUse when a PreToolUse warning was active.
+ */
+export function recordOutcome(
+  cwd: string,
+  command: string,
+  outcome: 'positive' | 'negative'
+): void {
+  const errors = readErrorIndex(cwd)
+  const baseCmd = extractBaseCommand(command)
+
+  const entry = errors.find(e =>
+    extractBaseCommand(e.command) === baseCmd && e.fix
+  )
+  if (!entry) return
+
+  if (outcome === 'positive') {
+    entry.confidence = Math.min(1.0, entry.confidence + 0.1)
+    entry.lastSeen = today()
+  } else {
+    entry.confidence = Math.max(MIN_CONFIDENCE, entry.confidence - 0.15)
+  }
+
+  writeErrors(cwd, errors)
+}
+
+// ─── Querying ───────────────────────────────────────────────
+
+/**
+ * Look up known errors for a command. Uses effective confidence (after decay).
  * Returns the most relevant error entry if one exists.
  */
 export function findKnownError(cwd: string, command: string): ErrorEntry | null {
   const errors = readErrorIndex(cwd)
   const baseCmd = extractBaseCommand(command)
 
-  // Find errors with the same base command that have a known fix
-  const withFix = errors.find(e =>
-    extractBaseCommand(e.command) === baseCmd && e.fix && e.occurrences >= 2
-  )
+  const candidates = errors
+    .filter(e => extractBaseCommand(e.command) === baseCmd)
+    .map(e => ({
+      ...e,
+      effective: effectiveConfidence(e.confidence, e.lastSeen),
+    }))
+    .filter(e => e.effective >= 0.2) // skip stale entries
+    .sort((a, b) => b.effective - a.effective)
+
+  // Prefer entries with a fix
+  const withFix = candidates.find(e => e.fix)
   if (withFix) return withFix
 
-  // Also return errors without a fix but with 3+ occurrences (warn only)
-  const frequent = errors.find(e =>
-    extractBaseCommand(e.command) === baseCmd && e.occurrences >= 3
-  )
-  return frequent || null
+  // Fall back to high-confidence entries without fix
+  const highConf = candidates.find(e => e.effective >= 0.4)
+  return highConf || null
 }
 
 /**
- * Clean up errors older than 90 days.
+ * Run decay pass — archive entries below threshold.
+ * Returns count of archived entries.
+ */
+export function runLocalDecayPass(cwd: string): number {
+  const errors = readErrorIndex(cwd)
+  let archived = 0
+
+  const surviving = errors.filter(e => {
+    const eff = effectiveConfidence(e.confidence, e.lastSeen)
+    if (eff < DECAY_ARCHIVE_THRESHOLD) {
+      archived++
+      return false
+    }
+    return true
+  })
+
+  if (archived > 0) {
+    writeErrors(cwd, surviving)
+  }
+  return archived
+}
+
+/**
+ * Clean up errors older than 90 days (legacy compat, superseded by decay).
  */
 export function cleanupErrorIndex(cwd: string): void {
   const errors = readErrorIndex(cwd)
@@ -139,31 +264,23 @@ export function cleanupErrorIndex(cwd: string): void {
   }
 }
 
+// ─── Utilities ──────────────────────────────────────────────
+
 /**
  * Extract the base command (binary name) from a full command string.
- * "dotnet build --no-restore" → "dotnet"
- * "npm test -- --watch" → "npm"
- * "python3 -m pytest" → "python3"
  */
 export function extractBaseCommand(command: string): string {
   const trimmed = command.trim()
-  // Skip env vars and redirects at the start
   const parts = trimmed.split(/\s+/)
   for (const part of parts) {
-    // Skip env var assignments (KEY=value)
     if (part.includes('=') && !part.startsWith('-')) continue
-    // Skip common prefixes
     if (part === 'sudo' || part === 'npx' || part === 'bunx') continue
     return part
   }
   return parts[0] || trimmed
 }
 
-/**
- * Check if two error messages are similar enough to be the same error.
- */
 function similarError(a: string, b: string): boolean {
-  // Compare first lines — distinguishes "error TS2322: Type 'string'" from "error TS2322: Type 'Date'"
   const lineA = a.split('\n')[0].trim().toLowerCase()
   const lineB = b.split('\n')[0].trim().toLowerCase()
   return lineA === lineB

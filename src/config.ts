@@ -5,6 +5,13 @@ import { homedir } from 'node:os'
 const CONFIG_DIR = resolve(homedir(), '.clauditor')
 const CONFIG_FILE = resolve(CONFIG_DIR, 'config.json')
 
+export interface ProjectHubConfig {
+  apiKey: string
+  url: string
+  developerHash: string
+  teamName?: string
+}
+
 export interface ClauditorUserConfig {
   rotation: {
     enabled: boolean
@@ -14,6 +21,8 @@ export interface ClauditorUserConfig {
   notifications: {
     desktop: boolean
   }
+  /** Per-project hub config, keyed by normalized git remote URL */
+  projects?: Record<string, ProjectHubConfig>
 }
 
 const DEFAULTS: ClauditorUserConfig = {
@@ -37,10 +46,37 @@ export function readConfig(): ClauditorUserConfig {
     return {
       rotation: { ...DEFAULTS.rotation, ...raw.rotation },
       notifications: { ...DEFAULTS.notifications, ...raw.notifications },
+      projects: raw.projects ? { ...raw.projects } : undefined,
     }
   } catch {
     return { ...DEFAULTS }
   }
+}
+
+/**
+ * Get hub config for a specific project (by normalized git remote URL).
+ */
+export function getProjectHubConfig(gitRemoteUrl: string): ProjectHubConfig | null {
+  const config = readConfig()
+  return config.projects?.[gitRemoteUrl] ?? null
+}
+
+/**
+ * Save hub config for a specific project.
+ */
+export function setProjectHubConfig(gitRemoteUrl: string, hubConfig: ProjectHubConfig): void {
+  const config = readConfig()
+  if (!config.projects) config.projects = {}
+  config.projects[gitRemoteUrl] = hubConfig
+  writeConfig(config)
+}
+
+/**
+ * Write the full config to disk.
+ */
+export function writeConfig(config: ClauditorUserConfig): void {
+  mkdirSync(CONFIG_DIR, { recursive: true })
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n')
 }
 
 /**

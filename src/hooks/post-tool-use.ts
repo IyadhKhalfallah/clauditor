@@ -3,7 +3,8 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
-import { recordError, recordFix } from '../features/error-index.js'
+import { recordError, recordFix, recordOutcome, extractBaseCommand } from '../features/error-index.js'
+import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
 import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
@@ -51,6 +52,20 @@ export async function handlePostToolUseHook(): Promise<void> {
 
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
   const parts: string[] = []
+  const hubPushes: Promise<void>[] = []
+
+  // Fire-and-forget hub push helper
+  function hubPush(cwd: string | null, fragments: Array<{ type: string; content: Record<string, unknown> }>) {
+    if (!cwd) return
+    hubPushes.push((async () => {
+      try {
+        const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
+        const hub = resolveHubContext(cwd)
+        if (!hub) return
+        await pushKnowledge(hub.projectHash, hub.config.developerHash, fragments, hub.config, hub.remoteUrl)
+      } catch {}
+    })())
+  }
 
   // Resolve cwd — may not be provided by Claude Code in all contexts
   const cwd = input.cwd || null
@@ -91,6 +106,47 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       // Command succeeded — check if it's a fix for a recent error
       try { recordFix(cwd, input.tool_input.command) } catch {}
     }
+
+    // Push errors to hub (local recording already handled above)
+    const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
+    if (command && toolResponse && (toolResponse.includes('error') || toolResponse.includes('Error') || toolResponse.includes('FAILED'))) {
+      hubPush(cwd, [{
+        type: 'error',
+        content: { command: command.slice(0, 200), error_message: toolResponse.slice(0, 500) },
+      }])
+    }
+
+    // 1c. Implicit outcome tracking — did a PreToolUse warning lead to success or failure?
+    if (cwd && command) {
+      try {
+        const pending = readOutcomePending()
+        if (pending && extractBaseCommand(command) === extractBaseCommand(pending.command)) {
+          const isError = !!errorGuidance
+          const outcome = isError ? 'negative' : 'positive'
+
+          // Update local confidence
+          recordOutcome(cwd, command, outcome)
+
+          // Push outcome to hub if entry IDs are available
+          if (pending.hubEntryIds && pending.hubEntryIds.length > 0) {
+            hubPushes.push((async () => {
+              try {
+                const { resolveHubContext } = await import('../hub/client.js')
+                const hub = resolveHubContext(cwd)
+                if (!hub) return
+                await fetch(`${hub.config.url}/api/v1/knowledge/outcome`, {
+                  method: 'POST',
+                  headers: { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ entry_ids: pending.hubEntryIds, outcome }),
+                })
+              } catch {}
+            })())
+          }
+
+          clearOutcomePending()
+        }
+      } catch {}
+    }
   }
 
   // 2. Detect repeated edits to the same file — a sign of thrashing
@@ -105,10 +161,12 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       if (cwd) {
         try { recordFileEdit(cwd, filePath, input.session_id) } catch {}
       }
+      // Push file activity to hub
+      hubPush(cwd, [{ type: 'file_activity', content: { file: filePath, action: 'edit' } }])
     }
   }
 
-  // 2b. Track file reads + inject context for hot files
+  // 2b. Track file reads + inject context for hot files + error cross-reference
   if (input.tool_name === 'Read') {
     const filePath = (input.tool_input?.file_path as string) || ''
     if (filePath && cwd) {
@@ -118,6 +176,45 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       if (fileCtx) {
         parts.push(fileCtx)
       }
+      // Cross-reference: known errors involving this file
+      try {
+        const { readErrorIndex } = await import('../features/error-index.js')
+        const errors = readErrorIndex(cwd)
+        const fileName = filePath.split('/').pop() || ''
+        const related = errors.filter((e) =>
+          e.fix && (e.command.includes(fileName) || e.error.includes(fileName))
+        )
+        if (related.length > 0) {
+          const lines = related.slice(0, 3).map((e) =>
+            `- \`${e.command.slice(0, 50)}\`: ${e.error.slice(0, 80)}` +
+            (e.fix ? ` → fix: \`${e.fix.slice(0, 60)}\`` : '')
+          )
+          parts.push(
+            `[clauditor]: Known errors related to \`${fileName}\`:\n` + lines.join('\n')
+          )
+        }
+      } catch {}
+
+      // Query hub for team knowledge about this file
+      try {
+        const { resolveHubContext, queryKnowledge } = await import('../hub/client.js')
+        const hub = resolveHubContext(cwd)
+        if (hub) {
+          const result = await queryKnowledge(hub.projectHash, 'file', filePath, hub.config)
+          if (result.entries.length > 0) {
+            const lines = result.entries.map((e) => {
+              const body = e.body as Record<string, string>
+              if (e.entry_type === 'file_role') return `- **${e.title}**: ${body.role || ''}`
+              if (e.entry_type === 'convention') return `- **${e.title}**: ${body.pattern || body.description || ''}`
+              if (e.entry_type === 'gotcha') return `- **${e.title}**: ${body.description || ''}${body.solution ? ` → ${body.solution}` : ''}`
+              return `- **${e.title}** (${e.entry_type})`
+            })
+            parts.push(
+              `[clauditor hub — team knowledge for \`${filePath.split('/').pop()}\`]:\n` + lines.join('\n')
+            )
+          }
+        }
+      } catch {}
     }
   }
 
@@ -138,6 +235,11 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     if ('additionalContext' in healthResult && healthResult.additionalContext) {
       parts.push(healthResult.additionalContext)
     }
+  }
+
+  // Wait for hub pushes before process exits
+  if (hubPushes.length > 0) {
+    await Promise.allSettled(hubPushes)
   }
 
   if (parts.length === 0) return {}
