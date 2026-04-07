@@ -1169,7 +1169,10 @@ program
       try {
         const projectDirs = readdirSync(claudeDir, { withFileTypes: true })
           .filter(d => d.isDirectory())
-        let newest: { path: string; mtime: number } | null = null
+        // Find the most recent transcript that's large enough to have meaningful facts
+        // Skip tiny transcripts (< 50KB / ~10 turns) — they produce "no facts found"
+        const MIN_TRANSCRIPT_BYTES = 50_000
+        const candidates: Array<{ path: string; mtime: number; size: number }> = []
         for (const dir of projectDirs) {
           const dirPath = resolve(claudeDir, dir.name)
           try {
@@ -1177,13 +1180,14 @@ program
             for (const f of files) {
               const fp = resolve(dirPath, f)
               const st = statSync(fp)
-              if (!newest || st.mtimeMs > newest.mtime) {
-                newest = { path: fp, mtime: st.mtimeMs }
-              }
+              candidates.push({ path: fp, mtime: st.mtimeMs, size: st.size })
             }
           } catch {}
         }
-        if (newest) transcriptPath = newest.path
+        // Sort by recency, pick the most recent one that's large enough
+        candidates.sort((a, b) => b.mtime - a.mtime)
+        const viable = candidates.find(c => c.size >= MIN_TRANSCRIPT_BYTES)
+        if (viable) transcriptPath = viable.path
       } catch {}
     }
 
