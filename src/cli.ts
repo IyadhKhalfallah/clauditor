@@ -1192,7 +1192,22 @@ program
       process.exit(1)
     }
 
-    // Find handoff summary
+    // Extract cwd from transcript to match with the right handoff
+    let transcriptCwd: string | null = null
+    try {
+      const lines = readFileSync(transcriptPath, 'utf-8').split('\n')
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const r = JSON.parse(lines[i])
+          if (r.type === 'user' && r.cwd) {
+            transcriptCwd = r.cwd
+            break
+          }
+        } catch {}
+      }
+    } catch {}
+
+    // Find handoff summary — match by project if possible
     let summaryContent: string
     if (options.summary) {
       summaryContent = readFileSync(options.summary, 'utf-8')
@@ -1202,7 +1217,11 @@ program
         console.error('No recent handoff found. Specify one with --summary <path>')
         process.exit(1)
       }
-      summaryContent = handoffs[0].content
+      // Prefer handoff from the same project as the transcript
+      const matched = transcriptCwd
+        ? handoffs.find(h => h.project === transcriptCwd || h.content.includes(transcriptCwd!))
+        : null
+      summaryContent = (matched || handoffs[0]).content
     }
 
     // Extract and score
@@ -1215,8 +1234,12 @@ program
     const score = scoreHandoff(facts, summaryContent)
 
     if (options.json) {
-      console.log(JSON.stringify({ ...score, transcriptPath }, null, 2))
+      console.log(JSON.stringify({ ...score, transcriptPath, project: transcriptCwd }, null, 2))
     } else {
+      if (transcriptCwd) {
+        const projectName = transcriptCwd.split('/').pop() || transcriptCwd
+        console.log(`Project: ${projectName}\n`)
+      }
       console.log(generateReport(score))
     }
   })
