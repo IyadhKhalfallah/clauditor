@@ -102,6 +102,7 @@ describe('extractFacts', () => {
     const path = writeTranscript('rejected.jsonl', [
       { type: 'assistant', message: { content: [
         { type: 'text', text: 'I tried using inline styles but that didn\'t work because Clerk overrides them.' },
+        { type: 'tool_use', name: 'Edit', input: { file_path: 'src/app/layout.tsx' } },
       ] } },
     ])
     const rejected = extractFacts(path).filter(f => f.category === 'approach_rejected')
@@ -114,6 +115,7 @@ describe('extractFacts', () => {
     const path = writeTranscript('cond.jsonl', [
       { type: 'assistant', message: { content: [
         { type: 'text', text: 'You need to run the database migrations before building the application successfully.' },
+        { type: 'tool_use', name: 'Bash', input: { command: 'npx drizzle-kit push' } },
       ] } },
     ])
     const conds = extractFacts(path).filter(f => f.category === 'conditional')
