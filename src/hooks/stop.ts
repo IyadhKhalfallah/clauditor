@@ -155,15 +155,16 @@ function captureRotationHandoff(input: StopHookInput): void {
     process.stderr.write(`clauditor: failed to save rotation handoff: ${err}\n`)
   }
 
-  // Push summary to hub (fire-and-forget)
+  // Push summary to hub (fire-and-forget, scrubbed)
   ;(async () => {
     try {
       const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
+      const { scrubSummary } = await import('../features/secret-scrubber.js')
       const hub = resolveHubContext(cwd || undefined)
       if (!hub) return
       await pushKnowledge(hub.projectHash, hub.config.developerHash, [{
         type: 'summary',
-        content: { summary: msg.slice(0, 2000), session_id: input.session_id, timestamp: new Date().toISOString() },
+        content: { summary: scrubSummary(msg.slice(0, 2000)), session_id: input.session_id, timestamp: new Date().toISOString() },
       }], hub.config, hub.remoteUrl)
     } catch {}
   })()

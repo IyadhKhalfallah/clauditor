@@ -54,15 +54,21 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   const parts: string[] = []
   const hubPushes: Promise<void>[] = []
 
-  // Fire-and-forget hub push helper
+  // Fire-and-forget hub push helper — scrubs secrets before sending
   function hubPush(cwd: string | null, fragments: Array<{ type: string; content: Record<string, unknown> }>) {
     if (!cwd) return
     hubPushes.push((async () => {
       try {
         const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
+        const { scrubFragmentContent } = await import('../features/secret-scrubber.js')
         const hub = resolveHubContext(cwd)
         if (!hub) return
-        await pushKnowledge(hub.projectHash, hub.config.developerHash, fragments, hub.config, hub.remoteUrl)
+        // Scrub every fragment before it leaves the machine
+        const scrubbed = fragments.map(f => ({
+          type: f.type,
+          content: scrubFragmentContent(f.content).content,
+        }))
+        await pushKnowledge(hub.projectHash, hub.config.developerHash, scrubbed, hub.config, hub.remoteUrl)
       } catch {}
     })())
   }
