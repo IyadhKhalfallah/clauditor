@@ -122,7 +122,7 @@ Fires at the exact moment before Claude Code compacts your context. Saves sessio
 
 ### `PostCompact` — captures Claude's summary + mechanical state
 
-Fires after compaction. Merges Claude's own LLM-generated summary with mechanically extracted structured data (files, commits, commands) from the JSONL transcript. The combined handoff preserves ~60% of verifiable session facts — 3x better than prose alone.
+Fires after compaction. Merges Claude's own LLM-generated summary with mechanically extracted structured data (files, commits, commands) from the JSONL transcript.
 
 ### `SessionStart` — injects previous session context
 
@@ -321,22 +321,22 @@ This data is deterministic — no LLM interpretation, no paraphrasing, no loss.
 
 ### Why both?
 
-Research shows LLM-generated summaries lose ~84% of verifiable facts ([Size-Fidelity Paradox](https://arxiv.org/abs/2602.09789)). Mechanical extraction preserves files and commits perfectly but can't capture reasoning. The combined handoff achieves **~60% fact preservation** — 3x better than prose alone.
+Research shows LLM-generated summaries suffer from knowledge overwriting and semantic drift ([Size-Fidelity Paradox](https://arxiv.org/abs/2602.09789)). Mechanical extraction preserves files and commits deterministically. Claude's prose captures reasoning the transcript can't. Together they give the next session the best possible starting point.
 
 ```bash
-clauditor handoff-report   # measure your last handoff's preservation score
+clauditor handoff-report   # see what your last handoff contains
 ```
 
 ```
-  Handoff Quality
+  Structural Coverage
   ────────────────────────────────────────────────────
 
-  Score:  58% (37/84 facts preserved)
+  Score:  73% (11/15 structural items in handoff)
 
-  Files modified       20/21  ███████████████████░
-  Commits                6/8  ███████████████░░░░░
-  Commands              6/36  ███░░░░░░░░░░░░░░░░░
-  Rejected approaches    0/2  ░░░░░░░░░░░░░░░░░░░░
+  Files modified         2/4  ██████████░░░░░░░░░░
+  Commits                2/2  ████████████████████
+  Files read             3/5  ████████████░░░░░░░░
+  Commands               2/2  ████████████████████
 ```
 
 ### Per-session storage
