@@ -122,35 +122,39 @@ export function extractFacts(transcriptPath: string): TranscriptFact[] {
       const msg = r.message as { content?: Array<Record<string, unknown>> }
       if (!Array.isArray(msg.content)) continue
 
-      // Extract assistant text for approach rejection detection
-      const textBlocks = msg.content
-        .filter((b) => b.type === 'text' && typeof b.text === 'string')
-        .map((b) => b.text as string)
+      // Only extract reasoning from turns where Claude is doing actual work
+      // (turns with tool_use blocks), not from pure discussion/planning turns.
+      // This prevents extracting meta-discussion about approaches as actual approaches.
+      const hasToolUse = msg.content.some((b) => b.type === 'tool_use')
 
-      for (const text of textBlocks) {
-        // Detect rejected approaches — "tried X but", "reverted", "that didn't work"
-        // Extract the full sentence containing the rejection for context
-        const sentences = text.split(/[.!?\n]/).map(s => s.trim()).filter(s => s.length > 15)
-        for (const sentence of sentences) {
-          const isRejection =
-            /(?:tried|attempted)\s+.{5,}?\s+(?:but|however|which\s+didn't|didn't\s+work)/i.test(sentence) ||
-            /(?:reverted|rolled back|undid)\s+.{5,}/i.test(sentence) ||
-            /(?:abandoned|scrapped|dropped)\s+.{5,}\s+approach/i.test(sentence)
-          if (isRejection) {
-            approachesRejected.add(sentence.slice(0, 120))
+      if (hasToolUse) {
+        const textBlocks = msg.content
+          .filter((b) => b.type === 'text' && typeof b.text === 'string')
+          .map((b) => b.text as string)
+
+        for (const text of textBlocks) {
+          // Detect rejected approaches — "tried X but", "reverted", "that didn't work"
+          const sentences = text.split(/[.!?\n]/).map(s => s.trim()).filter(s => s.length > 15 && s.length < 200)
+          for (const sentence of sentences) {
+            const isRejection =
+              /(?:tried|attempted)\s+.{5,}?\s+(?:but|however|which\s+didn't|didn't\s+work)/i.test(sentence) ||
+              /(?:reverted|rolled back|undid)\s+.{5,}/i.test(sentence) ||
+              /(?:abandoned|scrapped|dropped)\s+.{5,}\s+approach/i.test(sentence)
+            if (isRejection) {
+              approachesRejected.add(sentence.slice(0, 120))
+            }
           }
-        }
 
-        // Detect conditional relationships — "if X then Y", "X requires Y", "must Y before X"
-        // Must have BOTH a condition and a consequence to be a real conditional
-        const condPatterns = [
-          /(?:you\s+)?(?:need|must|have)\s+to\s+(.{15,80})\s+(?:before|first|prior\s+to)\s+(.{10,})/i,
-          /(?:if\s+)(.{15,80}),?\s+(?:then\s+|you\s+should\s+|it\s+will\s+)(.{10,})/i,
-          /(?:won't|can't|doesn't)\s+work\s+(?:without|unless)\s+(.{15,80})/i,
-        ]
-        for (const pat of condPatterns) {
-          const m = text.match(pat)
-          if (m) conditionals.add((m[1] || m[0]).slice(0, 100))
+          // Detect conditional relationships — "must X before Y", "won't work without X"
+          const condPatterns = [
+            /(?:you\s+)?(?:need|must|have)\s+to\s+(.{15,80})\s+(?:before|first|prior\s+to)\s+(.{10,})/i,
+            /(?:if\s+)(.{15,80}),?\s+(?:then\s+|you\s+should\s+|it\s+will\s+)(.{10,})/i,
+            /(?:won't|can't|doesn't)\s+work\s+(?:without|unless)\s+(.{15,80})/i,
+          ]
+          for (const pat of condPatterns) {
+            const m = text.match(pat)
+            if (m) conditionals.add((m[1] || m[0]).slice(0, 100))
+          }
         }
       }
 
