@@ -191,7 +191,13 @@ export function clearCommandBuffer(cwd: string): void {
   writeCommandBuffer(cwd, [])
 }
 
-export function recordFix(cwd: string, command: string): void {
+export interface FixResult {
+  command: string
+  error: string
+  fix: string
+}
+
+export function recordFix(cwd: string, command: string): FixResult | null {
   const errors = readErrorIndex(cwd)
   const baseCmd = extractBaseCommand(command)
   const now = Date.now()
@@ -205,7 +211,7 @@ export function recordFix(cwd: string, command: string): void {
     )
     .sort((a, b) => (b.lastErrorMs || 0) - (a.lastErrorMs || 0))[0]
 
-  if (!unfixed) return
+  if (!unfixed) return null
 
   // Use intermediate commands as the fix (what ran between failure and success)
   const buffer = readCommandBuffer(cwd)
@@ -225,6 +231,8 @@ export function recordFix(cwd: string, command: string): void {
   unfixed.confidence = Math.min(1.0, unfixed.confidence + 0.15)
   writeErrors(cwd, errors)
   writeCommandBuffer(cwd, [])
+
+  return { command: unfixed.command, error: unfixed.error, fix: unfixed.fix! }
 }
 
 /**
