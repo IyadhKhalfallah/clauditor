@@ -159,9 +159,10 @@ program
 program
   .command('install')
   .description('Register clauditor hooks in ~/.claude/settings.json')
-  .action(async () => {
+  .option('--claude-dir <path>', 'Path to Claude config directory (default: ~/.claude)')
+  .action(async (opts: { claudeDir?: string }) => {
     const { installHooks } = await import('./install.js')
-    const messages = await installHooks()
+    const messages = await installHooks(opts.claudeDir)
     for (const msg of messages) {
       console.log(msg)
     }
@@ -172,9 +173,10 @@ program
 program
   .command('uninstall')
   .description('Remove clauditor hooks from ~/.claude/settings.json')
-  .action(async () => {
+  .option('--claude-dir <path>', 'Path to Claude config directory (default: ~/.claude)')
+  .action(async (opts: { claudeDir?: string }) => {
     const { uninstallHooks } = await import('./install.js')
-    const messages = await uninstallHooks()
+    const messages = await uninstallHooks(opts.claudeDir)
     for (const msg of messages) {
       console.log(msg)
     }

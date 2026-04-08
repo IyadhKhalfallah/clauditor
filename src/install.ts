@@ -3,7 +3,15 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 
-const SETTINGS_PATH = resolve(homedir(), '.claude/settings.json')
+const DEFAULT_CLAUDE_DIR = resolve(homedir(), '.claude')
+
+function settingsPath(claudeDir?: string): string {
+  return resolve(claudeDir ?? DEFAULT_CLAUDE_DIR, 'settings.json')
+}
+
+function skillDir(claudeDir?: string): string {
+  return resolve(claudeDir ?? DEFAULT_CLAUDE_DIR, 'skills/save-skill')
+}
 
 interface ClaudeSettings {
   hooks?: Record<string, HookEventConfig[]>
@@ -62,8 +70,8 @@ const CLAUDITOR_MARKER = 'clauditor hook'
  * Install clauditor hooks into ~/.claude/settings.json.
  * Merges non-destructively — preserves existing hooks.
  */
-export async function installHooks(): Promise<string[]> {
-  const settings = await readSettings()
+export async function installHooks(claudeDir?: string): Promise<string[]> {
+  const settings = await readSettings(claudeDir)
   const messages: string[] = []
 
   if (!settings.hooks) {
@@ -104,11 +112,11 @@ export async function installHooks(): Promise<string[]> {
     messages.push(`${eventName}: ✓ installed`)
   }
 
-  await writeSettings(settings)
-  messages.push(`\nSettings written to ${SETTINGS_PATH}`)
+  await writeSettings(settings, claudeDir)
+  messages.push(`\nSettings written to ${settingsPath(claudeDir)}`)
 
-  // Install the /save-skill skill to ~/.claude/skills/save-skill/
-  const skillMessages = await installSaveSkill()
+  // Install the /save-skill skill
+  const skillMessages = await installSaveSkill(claudeDir)
   messages.push(...skillMessages)
 
   // Write config if not present
@@ -130,10 +138,10 @@ export async function installHooks(): Promise<string[]> {
 /**
  * Install the /save-skill skill to the user's personal skills directory.
  */
-async function installSaveSkill(): Promise<string[]> {
+async function installSaveSkill(claudeDir?: string): Promise<string[]> {
   const messages: string[] = []
-  const skillDir = resolve(homedir(), '.claude/skills/save-skill')
-  const skillPath = resolve(skillDir, 'SKILL.md')
+  const dir = skillDir(claudeDir)
+  const skillPath = resolve(dir, 'SKILL.md')
 
   try {
     // Check if already installed
@@ -145,7 +153,7 @@ async function installSaveSkill(): Promise<string[]> {
       // Not installed yet
     }
 
-    await mkdir(skillDir, { recursive: true })
+    await mkdir(dir, { recursive: true })
 
     // Find the bundled SKILL.md — it's in the package's skills/ directory
     const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -161,7 +169,8 @@ async function installSaveSkill(): Promise<string[]> {
       await writeFile(skillPath, skillContent)
     }
 
-    messages.push('/save-skill: ✓ installed to ~/.claude/skills/save-skill/')
+    const displayDir = dir.replace(homedir(), '~')
+    messages.push(`/save-skill: ✓ installed to ${displayDir}/`)
   } catch (err) {
     messages.push(`/save-skill: ⚠ failed to install — ${err}`)
   }
@@ -206,8 +215,8 @@ The user wants to save what was done in this session as a reusable Claude Code s
 /**
  * Remove clauditor hooks from ~/.claude/settings.json.
  */
-export async function uninstallHooks(): Promise<string[]> {
-  const settings = await readSettings()
+export async function uninstallHooks(claudeDir?: string): Promise<string[]> {
+  const settings = await readSettings(claudeDir)
   const messages: string[] = []
 
   if (!settings.hooks) {
@@ -239,15 +248,16 @@ export async function uninstallHooks(): Promise<string[]> {
     delete settings.hooks
   }
 
-  await writeSettings(settings)
-  messages.push(`\nSettings written to ${SETTINGS_PATH}`)
+  await writeSettings(settings, claudeDir)
+  messages.push(`\nSettings written to ${settingsPath(claudeDir)}`)
 
   // Remove /save-skill
-  const skillPath = resolve(homedir(), '.claude/skills/save-skill/SKILL.md')
+  const dir = skillDir(claudeDir)
+  const saveSkillPath = resolve(dir, 'SKILL.md')
   try {
-    await access(skillPath)
+    await access(saveSkillPath)
     const { rm } = await import('node:fs/promises')
-    await rm(resolve(homedir(), '.claude/skills/save-skill'), { recursive: true })
+    await rm(dir, { recursive: true })
     messages.push('/save-skill: ✓ removed')
   } catch {
     // Not installed
@@ -256,16 +266,17 @@ export async function uninstallHooks(): Promise<string[]> {
   return messages
 }
 
-async function readSettings(): Promise<ClaudeSettings> {
+async function readSettings(claudeDir?: string): Promise<ClaudeSettings> {
   try {
-    const content = await readFile(SETTINGS_PATH, 'utf-8')
+    const content = await readFile(settingsPath(claudeDir), 'utf-8')
     return JSON.parse(content)
   } catch {
     return {}
   }
 }
 
-async function writeSettings(settings: ClaudeSettings): Promise<void> {
-  await mkdir(dirname(SETTINGS_PATH), { recursive: true })
-  await writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n')
+async function writeSettings(settings: ClaudeSettings, claudeDir?: string): Promise<void> {
+  const p = settingsPath(claudeDir)
+  await mkdir(dirname(p), { recursive: true })
+  await writeFile(p, JSON.stringify(settings, null, 2) + '\n')
 }
