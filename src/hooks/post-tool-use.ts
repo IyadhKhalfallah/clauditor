@@ -114,7 +114,20 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       }
     } else if (cwd && typeof input.tool_input?.command === 'string') {
       // Command succeeded — check if it's a fix for a recent error
-      try { recordFix(cwd, input.tool_input.command) } catch {}
+      try {
+        const fixResult = recordFix(cwd, input.tool_input.command)
+        if (fixResult) {
+          // Push the fix to the hub so team members learn from it
+          hubPush(cwd, [{
+            type: 'error',
+            content: {
+              command: fixResult.command,
+              error_message: fixResult.error,
+              fix: fixResult.fix,
+            },
+          }])
+        }
+      } catch {}
     }
 
     // Push errors to hub (local recording already handled above)
