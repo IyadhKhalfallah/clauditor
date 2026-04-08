@@ -182,9 +182,83 @@ program
     }
   })
 
+// ─── clauditor login ─────────────────────────────────────────────
+
+const DEFAULT_HUB_URL = 'https://www.clauditor.ai'
+
+program
+  .command('login')
+  .description('Sign in to clauditor hub (opens browser)')
+  .option('--hub-url <url>', 'Hub URL', DEFAULT_HUB_URL)
+  .action(async (options) => {
+    const { createHash } = await import('node:crypto')
+    const { hostname, userInfo } = await import('node:os')
+    const { execSync } = await import('node:child_process')
+    const { startAuthServer } = await import('./hub/auth-server.js')
+    const { setProjectHubConfig } = await import('./config.js')
+    const { getGitRemoteUrl } = await import('./hub/git-project.js')
+
+    const remoteUrl = getGitRemoteUrl()
+    if (!remoteUrl) {
+      console.error('\n  ✗ Not a git repo with a remote origin.')
+      console.error('    Run this from inside a git repo with a remote configured.')
+      process.exit(1)
+    }
+
+    const developerHash = createHash('sha256')
+      .update(`${hostname()}:${userInfo().username}`)
+      .digest('hex')
+      .slice(0, 16)
+
+    const state = createHash('sha256')
+      .update(`${Date.now()}:${Math.random()}`)
+      .digest('hex')
+      .slice(0, 32)
+
+    // Start localhost callback server
+    const { port, waitForResult } = await startAuthServer(state)
+
+    const hubUrl = options.hubUrl
+    const authUrl = `${hubUrl}/cli-auth?state=${state}&port=${port}&project=${encodeURIComponent(remoteUrl)}&developer_hash=${developerHash}`
+
+    console.log('\n  Opening browser to sign in...')
+    console.log(`\n  If the browser didn't open, visit:`)
+    console.log(`  ${authUrl}\n`)
+
+    // Open browser (cross-platform)
+    try {
+      const platform = process.platform
+      if (platform === 'darwin') execSync(`open "${authUrl}"`)
+      else if (platform === 'win32') execSync(`start "${authUrl}"`)
+      else execSync(`xdg-open "${authUrl}"`)
+    } catch {
+      // Browser open failed — user will use the printed URL
+    }
+
+    console.log('  Waiting for authentication...')
+
+    try {
+      const result = await waitForResult()
+
+      setProjectHubConfig(remoteUrl, {
+        apiKey: result.apiKey,
+        url: hubUrl,
+        developerHash,
+        teamName: result.teamName,
+      })
+
+      console.log(`\n  ✓ Logged in to team "${result.teamName}" (${result.plan})`)
+      console.log(`  Connected: ${remoteUrl} → ${result.teamName}`)
+      console.log(`\n  Knowledge will sync automatically during sessions on this project.`)
+    } catch (err) {
+      console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
+      process.exit(1)
+    }
+  })
+
 // ─── clauditor team ──────────────────────────────────────────────
 
-const team = program.command('team').description('Team hub commands')
+const team = program.command('team').description('Team hub commands (use `clauditor login` instead)')
 
 team
   .command('join')
