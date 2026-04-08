@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
-import { recordError, recordFix, recordOutcome, extractBaseCommand } from '../features/error-index.js'
+import { recordError, recordFix, recordOutcome, extractBaseCommand, trackCommand, clearCommandBuffer } from '../features/error-index.js'
 import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
 import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
@@ -98,15 +98,19 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       }
     }
 
+    // Track every command for fix detection
+    const cmd = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
+    if (cwd && cmd) {
+      try { trackCommand(cwd, cmd) } catch {}
+    }
+
     // 1b. Post-error guidance — catch failing commands at attempt 1
-    // instead of waiting for the loop blocker at attempt 3.
     const errorGuidance = detectBashError(input.session_id, toolResponse)
     if (errorGuidance) {
       parts.push(errorGuidance)
-      // Record the error in the project knowledge index
-      const cmd = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
       if (cwd && cmd) {
         try { recordError(cwd, cmd, toolResponse.slice(0, 200)) } catch {}
+        try { clearCommandBuffer(cwd) } catch {}
       }
     } else if (cwd && typeof input.tool_input?.command === 'string') {
       // Command succeeded — check if it's a fix for a recent error

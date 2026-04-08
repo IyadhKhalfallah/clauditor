@@ -152,8 +152,44 @@ export function recordError(cwd: string, command: string, error: string): void {
 
 /**
  * Record a fix for a recent error. Boosts confidence.
+ *
+ * The fix is the intermediate commands between the failure and success,
+ * not the succeeding command itself. Example:
+ *   `npm run build` fails → `npx drizzle-kit push` → `npm run build` succeeds
+ *   Fix recorded: `npx drizzle-kit push`
  */
-const FIX_PROXIMITY_MS = 120_000 // 2 minutes (was 60s — too tight)
+const FIX_PROXIMITY_MS = 120_000
+
+const TRIVIAL_COMMANDS = new Set(['git', 'ls', 'cat', 'echo', 'cd', 'pwd', 'head', 'tail', 'grep', 'find', 'which', 'type', 'env', 'printenv', 'whoami', 'date', 'wc'])
+
+// Command buffer is persisted to disk because each hook invocation is a separate process.
+function commandBufferPath(cwd: string): string {
+  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 100)
+  return resolve(clauditorDir(), 'knowledge', encoded, 'cmd-buffer.json')
+}
+
+function readCommandBuffer(cwd: string): string[] {
+  try { return JSON.parse(readFileSync(commandBufferPath(cwd), 'utf-8')) } catch { return [] }
+}
+
+function writeCommandBuffer(cwd: string, buffer: string[]): void {
+  const dir = getKnowledgeDir(cwd)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(commandBufferPath(cwd), JSON.stringify(buffer))
+}
+
+/** Track a command that ran (call on every Bash before checking if it's a fix). */
+export function trackCommand(cwd: string, command: string): void {
+  const buffer = readCommandBuffer(cwd)
+  if (buffer.length >= 10) buffer.shift()
+  buffer.push(scrubSecrets(command.slice(0, 200)).scrubbed)
+  writeCommandBuffer(cwd, buffer)
+}
+
+/** Clear the command buffer when an error occurs. */
+export function clearCommandBuffer(cwd: string): void {
+  writeCommandBuffer(cwd, [])
+}
 
 export function recordFix(cwd: string, command: string): void {
   const errors = readErrorIndex(cwd)
@@ -171,9 +207,24 @@ export function recordFix(cwd: string, command: string): void {
 
   if (!unfixed) return
 
-  unfixed.fix = scrubSecrets(command.slice(0, 200)).scrubbed
-  unfixed.confidence = Math.min(1.0, unfixed.confidence + 0.15) // significant boost
+  // Use intermediate commands as the fix (what ran between failure and success)
+  const buffer = readCommandBuffer(cwd)
+  const intermediateSteps = buffer.filter(cmd => {
+    const base = extractBaseCommand(cmd)
+    if (base === baseCmd) return false
+    if (TRIVIAL_COMMANDS.has(base)) return false
+    return true
+  })
+
+  if (intermediateSteps.length > 0) {
+    unfixed.fix = intermediateSteps.join(' && ')
+  } else {
+    unfixed.fix = scrubSecrets(command.slice(0, 200)).scrubbed
+  }
+
+  unfixed.confidence = Math.min(1.0, unfixed.confidence + 0.15)
   writeErrors(cwd, errors)
+  writeCommandBuffer(cwd, [])
 }
 
 /**
