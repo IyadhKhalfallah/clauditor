@@ -229,7 +229,8 @@ Shows token costs by hour of day to detect if peak hours burn more quota:
 | `clauditor suggest-skill` | Find repeating workflows |
 | `clauditor knowledge` | Show accumulated errors and file activity |
 | `clauditor handoff-report` | Measure information preservation of last session handoff |
-| `clauditor team join` | Connect to a clauditor hub for team knowledge sharing (beta) |
+| `clauditor login` | Sign in to clauditor hub (opens browser, or `--device` for SSH) |
+| `clauditor team join` | Connect to hub with API key (for CI/headless — use `clauditor login` instead) |
 
 ## Audit-only mode (no hooks)
 
@@ -385,7 +386,16 @@ clauditor knowledge   # see accumulated errors and file activity
 For teams, clauditor can optionally connect to a hub for shared knowledge:
 
 ```bash
-clauditor team join --key <API_KEY> --hub-url https://your-hub.com
+clauditor login
+```
+
+Opens your browser to sign in. For SSH or headless environments:
+
+```bash
+clauditor login --device
+
+  Visit: https://www.clauditor.ai/device
+  Enter code: XPFN-8442
 ```
 
 When connected:
