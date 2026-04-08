@@ -230,7 +230,6 @@ Shows token costs by hour of day to detect if peak hours burn more quota:
 | `clauditor knowledge` | Show accumulated errors and file activity |
 | `clauditor handoff-report` | Measure information preservation of last session handoff |
 | `clauditor login` | Sign in to clauditor hub (opens browser, or `--device` for SSH) |
-| `clauditor team join` | Connect to hub with API key (for CI/headless — use `clauditor login` instead) |
 
 ## Audit-only mode (no hooks)
 
