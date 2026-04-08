@@ -50,15 +50,23 @@ jobs:
           VERSION="${{ needs.release-please.outputs.version }}"
           TARBALL_URL="https://registry.npmjs.org/@iyadhk/clauditor/-/clauditor-${VERSION}.tgz"
 
-          # Wait for npm registry to propagate
-          for i in 1 2 3 4 5; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$TARBALL_URL")
-            [ "$HTTP_CODE" = "200" ] && break
-            echo "Waiting for npm to propagate (attempt $i)..."
-            sleep 15
+          # Wait for npm registry to serve the correct version
+          for i in $(seq 1 10); do
+            TARBALL=$(curl -sL "$TARBALL_URL")
+            FOUND_VERSION=$(echo "$TARBALL" | tar xzf - --to-stdout package/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*: *"//;s/".*//')
+            if [ "$FOUND_VERSION" = "$VERSION" ]; then
+              SHA256=$(echo "$TARBALL" | shasum -a 256 | awk '{print $1}')
+              echo "Verified tarball version ${VERSION} with SHA ${SHA256}"
+              break
+            fi
+            echo "npm returned version '${FOUND_VERSION}' instead of '${VERSION}' (attempt $i/10)..."
+            sleep 30
           done
 
-          SHA256=$(curl -sL "$TARBALL_URL" | shasum -a 256 | awk '{print $1}')
+          if [ -z "$SHA256" ]; then
+            echo "::error::Failed to get correct tarball from npm after 10 attempts"
+            exit 1
+          fi
 
           git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/IyadhKhalfallah/homebrew-clauditor.git /tmp/homebrew-clauditor
           cd /tmp/homebrew-clauditor
