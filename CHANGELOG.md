@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.25.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.25.1...v1.25.2) (2026-04-08)
+
+
+### Bug Fixes
+
+* record intermediate commands as the fix, not the succeeding command ([#102](https://github.com/IyadhKhalfallah/clauditor/issues/102)) ([951c6d6](https://github.com/IyadhKhalfallah/clauditor/commit/951c6d681507c9853d5ab399d13fb3910ff630d6))
+* scrub secrets from local error index, not just hub push ([#100](https://github.com/IyadhKhalfallah/clauditor/issues/100)) ([17751b2](https://github.com/IyadhKhalfallah/clauditor/commit/17751b287e920b3a02190afd1a757f56a250b388))
+
 ## [1.25.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.25.0...v1.25.1) (2026-04-07)
 
 
