@@ -44,6 +44,7 @@
     "cosmiconfig": "^9.0.0",
     "ink": "^5.1.0",
     "node-notifier": "^10.0.1",
+    "open": "^11.0.0",
     "react": "^18.3.1"
   },
   "devDependencies": {

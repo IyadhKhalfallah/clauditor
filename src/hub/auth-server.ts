@@ -163,6 +163,11 @@ export async function startAuthServer(state: string): Promise<{
       if (!req.url) { res.writeHead(400); res.end(); return }
 
       const url = new URL(req.url, 'http://localhost')
+      // CORS — allow the hub page to call localhost via fetch
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
+
       if (url.pathname !== '/callback') { res.writeHead(404); res.end(); return }
 
       const returnedState = url.searchParams.get('state')
@@ -176,11 +181,12 @@ export async function startAuthServer(state: string): Promise<{
       if (!apiKey || !teamName || !teamId) { res.writeHead(400); res.end(); return }
 
       res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end(`<!DOCTYPE html><html><head><title>clauditor</title>
+      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>clauditor</title>
 <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d14;color:#e8e8f0}
 .c{text-align:center;padding:3rem;background:#181828;border-radius:1rem;border:1px solid #2a2a42}
 .k{font-size:3rem;margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}p{color:#9898b0;font-size:.875rem;margin:0}</style>
-</head><body><div class="c"><div class="k">✓</div><h1>Logged in to ${teamName}</h1><p>You can close this tab.</p></div></body></html>`)
+</head><body><div class="c"><div class="k">✓</div><h1>Logged in to ${teamName}</h1><p>You can close this tab.</p></div>
+<script>setTimeout(function(){window.close()},2000)</script></body></html>`)
 
       clearTimeout(timeout)
       setTimeout(() => {
