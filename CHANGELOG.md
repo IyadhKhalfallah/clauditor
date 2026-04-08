@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.25.2...v1.26.0) (2026-04-08)
+
+
+### Features
+
+* add --claude-dir flag to install and uninstall ([#104](https://github.com/IyadhKhalfallah/clauditor/issues/104)) ([474dc35](https://github.com/IyadhKhalfallah/clauditor/commit/474dc3506195d3011ecfeeaa4d0c1827a206f932)), closes [#103](https://github.com/IyadhKhalfallah/clauditor/issues/103)
+
 ## [1.25.2](https://github.com/IyadhKhalfallah/clauditor/compare/v1.25.1...v1.25.2) (2026-04-08)
 
 
