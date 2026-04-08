@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.27.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.26.0...v1.27.0) (2026-04-08)
+
+
+### Features
+
+* clauditor login — browser + device flow authentication ([#108](https://github.com/IyadhKhalfallah/clauditor/issues/108)) ([27d7ac9](https://github.com/IyadhKhalfallah/clauditor/commit/27d7ac93e2480fd519c85f10e632dd6edc983835))
+
+
+### Bug Fixes
+
+* verify npm tarball version before updating homebrew formula ([#106](https://github.com/IyadhKhalfallah/clauditor/issues/106)) ([3e7790d](https://github.com/IyadhKhalfallah/clauditor/commit/3e7790dc232591fd3e4ccbe8186deb585968bf44))
+
 ## [1.26.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.25.2...v1.26.0) (2026-04-08)
 
 
