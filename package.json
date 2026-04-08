@@ -1,6 +1,6 @@
 {
   "name": "@iyadhk/clauditor",
-  "version": "1.27.0",
+  "version": "1.27.1",
   "description": "Real-time token optimization and cache health daemon for Claude Code",
   "type": "module",
   "bin": {
