@@ -182,27 +182,25 @@ program
     }
   })
 
-// ─── clauditor team ──────────────────────────────────────────────
+// ─── clauditor login ─────────────────────────────────────────────
 
-const team = program.command('team').description('Team hub commands')
+const DEFAULT_HUB_URL = 'https://www.clauditor.ai'
 
-team
-  .command('join')
-  .description('Join a team hub (for the current project)')
-  .requiredOption('-k, --key <api_key>', 'Team API key (from team admin)')
-  .requiredOption('--hub-url <url>', 'Hub URL (provided by your team admin)')
+program
+  .command('login')
+  .description('Sign in to clauditor hub')
+  .option('--hub-url <url>', 'Hub URL', DEFAULT_HUB_URL)
+  .option('--device', 'Use device code flow instead of opening browser')
   .action(async (options) => {
     const { createHash } = await import('node:crypto')
     const { hostname, userInfo } = await import('node:os')
-    const { teamJoin } = await import('./hub/client.js')
     const { setProjectHubConfig } = await import('./config.js')
-    const { getGitRemoteUrl } = await import('./hub/git-project.js')
+    const { getGitRemoteUrl, getProjectHash } = await import('./hub/git-project.js')
 
     const remoteUrl = getGitRemoteUrl()
     if (!remoteUrl) {
       console.error('\n  ✗ Not a git repo with a remote origin.')
-      console.error('    Team sync requires a git remote so all team members share the same project identity.')
-      console.error('    Run this from inside a git repo with `git remote add origin <url>` configured.')
+      console.error('    Run this from inside a git repo with a remote configured.')
       process.exit(1)
     }
 
@@ -211,29 +209,96 @@ team
       .digest('hex')
       .slice(0, 16)
 
-    console.log(`  Project: ${remoteUrl}`)
-    console.log('  Connecting to hub...')
-    try {
-      const result = await teamJoin(options.key, developerHash, options.hubUrl)
+    const hubUrl = options.hubUrl
+    const isSSH = !!(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT)
+    const useDeviceFlow = options.device || isSSH
 
-      setProjectHubConfig(remoteUrl, {
-        apiKey: options.key,
-        url: options.hubUrl,
-        developerHash,
-        teamName: result.team_name,
-      })
-
-      console.log(`\n  ✓ Joined team "${result.team_name}"`)
-      console.log(`    Plan: ${result.plan}`)
-      console.log(`    Projects: ${result.project_count}`)
-      console.log(`\n  Linked: ${remoteUrl} → ${result.team_name}`)
-      console.log(`  Knowledge will sync automatically during sessions on this project.`)
-      console.log(`  Other projects remain local-only unless you run \`clauditor team join\` in them.`)
-    } catch (err) {
-      console.error(`\n  ✗ Failed to join: ${err instanceof Error ? err.message : err}`)
-      process.exit(1)
+    if (useDeviceFlow) {
+      // Device flow (RFC 8628) — for SSH, headless, or --no-browser
+      await loginDeviceFlow(hubUrl, remoteUrl, developerHash)
+    } else {
+      // Browser flow — primary, opens localhost callback
+      await loginBrowserFlow(hubUrl, remoteUrl, developerHash)
     }
   })
+
+async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash: string) {
+  const { createHash } = await import('node:crypto')
+  const { startAuthServer } = await import('./hub/auth-server.js')
+  const { setProjectHubConfig } = await import('./config.js')
+
+  const state = createHash('sha256')
+    .update(`${Date.now()}:${Math.random()}`)
+    .digest('hex')
+    .slice(0, 32)
+
+  const { port, waitForResult } = await startAuthServer(state)
+  const authUrl = `${hubUrl}/cli-auth?state=${state}&port=${port}&project=${encodeURIComponent(remoteUrl)}&developer_hash=${developerHash}`
+
+  console.log('\n  Opening browser to sign in...')
+  console.log(`\n  If the browser didn't open, visit:`)
+  console.log(`  ${authUrl}\n`)
+
+  try {
+    const open = (await import('open')).default
+    await open(authUrl)
+  } catch {
+    // Browser open failed — user will use the printed URL
+  }
+
+  console.log('  Waiting for authentication...')
+
+  try {
+    const result = await waitForResult()
+
+    setProjectHubConfig(remoteUrl, {
+      apiKey: result.apiKey,
+      url: hubUrl,
+      developerHash,
+      teamName: result.teamName,
+    })
+
+    console.log(`\n  ✓ Logged in to team "${result.teamName}" (${result.plan})`)
+    console.log(`  Connected: ${remoteUrl} → ${result.teamName}`)
+    console.log(`\n  Knowledge will sync automatically during sessions on this project.`)
+  } catch (err) {
+    console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
+    process.exit(1)
+  }
+}
+
+async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash: string) {
+  const { requestDeviceCode, pollForToken } = await import('./hub/device-flow.js')
+  const { setProjectHubConfig } = await import('./config.js')
+  const { getProjectHash } = await import('./hub/git-project.js')
+
+  console.log('\n  Requesting device code...')
+
+  try {
+    const projectHash = getProjectHash() || undefined
+    const codes = await requestDeviceCode(hubUrl, projectHash, developerHash)
+
+    console.log(`\n  Visit: ${codes.verification_url}`)
+    console.log(`  Enter code: ${codes.user_code}`)
+    console.log(`\n  Waiting for confirmation...`)
+
+    const result = await pollForToken(hubUrl, codes.device_code, codes.interval, codes.expires_in)
+
+    setProjectHubConfig(remoteUrl, {
+      apiKey: result.api_key,
+      url: hubUrl,
+      developerHash,
+      teamName: result.team_name,
+    })
+
+    console.log(`\n  ✓ Logged in to team "${result.team_name}" (${result.plan})`)
+    console.log(`  Connected: ${remoteUrl} → ${result.team_name}`)
+    console.log(`\n  Knowledge will sync automatically during sessions on this project.`)
+  } catch (err) {
+    console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
+    process.exit(1)
+  }
+}
 
 // ─── clauditor stats ─────────────────────────────────────────────
 
