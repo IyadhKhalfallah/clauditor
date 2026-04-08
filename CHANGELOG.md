@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.27.0...v1.27.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* push error fixes to hub, not just errors ([#109](https://github.com/IyadhKhalfallah/clauditor/issues/109)) ([468a3b8](https://github.com/IyadhKhalfallah/clauditor/commit/468a3b8a4532d212cb29d13b2da0c9cd1f3580e5))
+
 ## [1.27.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.26.0...v1.27.0) (2026-04-08)
 
 
