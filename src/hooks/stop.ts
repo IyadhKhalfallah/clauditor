@@ -155,17 +155,49 @@ function captureRotationHandoff(input: StopHookInput): void {
     process.stderr.write(`clauditor: failed to save rotation handoff: ${err}\n`)
   }
 
-  // Push summary to hub (fire-and-forget, scrubbed)
+  // Push structured learnings to hub (fire-and-forget, scrubbed)
   ;(async () => {
     try {
-      const { resolveHubContext, pushKnowledge } = await import('../hub/client.js')
-      const { scrubSummary } = await import('../features/secret-scrubber.js')
+      const { resolveHubContext } = await import('../hub/client.js')
+      const { scrubSecrets } = await import('../features/secret-scrubber.js')
+      const { parseStructuredHandoff } = await import('../features/session-state.js')
       const hub = resolveHubContext(cwd || undefined)
       if (!hub) return
-      await pushKnowledge(hub.projectHash, hub.config.developerHash, [{
-        type: 'summary',
-        content: { summary: scrubSummary(msg.slice(0, 2000)), session_id: input.session_id, timestamp: new Date().toISOString() },
-      }], hub.config, hub.remoteUrl)
+
+      // Parse structured sections from the handoff
+      const parsed = parseStructuredHandoff(msg)
+
+      if (parsed.isStructured) {
+        // Convert structured sections to learnings for durable storage
+        const learnings: Array<{ type: string; content: string; tags?: string[] }> = []
+
+        for (const item of parsed.failedApproaches) {
+          learnings.push({ type: 'failed_approach', content: scrubSecrets(item).scrubbed })
+        }
+        for (const item of parsed.dependencies) {
+          learnings.push({ type: 'dependency', content: scrubSecrets(item).scrubbed })
+        }
+        for (const item of parsed.decisions) {
+          learnings.push({ type: 'decision', content: scrubSecrets(item).scrubbed })
+        }
+
+        if (learnings.length > 0) {
+          try {
+            await fetch(`${hub.config.url}/api/v1/handoff/learn`, {
+              method: 'POST',
+              headers: {
+                'X-Clauditor-Key': hub.config.apiKey,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                project_hash: hub.projectHash,
+                developer_hash: hub.config.developerHash,
+                learnings,
+              }),
+            })
+          } catch {}
+        }
+      }
     } catch {}
   })()
 }
