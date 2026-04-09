@@ -14,14 +14,11 @@ import { readRecentHandoffs } from './session-state.js'
 export function buildProjectBrief(cwd: string): string | null {
   const sections: string[] = []
 
+  // Only inject knowledge that prevents concrete mistakes.
+  // Hot file lists and session summaries don't meet this bar.
+  // (Anthropic: "Would removing this cause Claude to make mistakes? If not, cut it.")
   const errorSection = buildErrorSection(cwd)
   if (errorSection) sections.push(errorSection)
-
-  const fileSection = buildFileSection(cwd)
-  if (fileSection) sections.push(fileSection)
-
-  const recentSection = buildRecentSection(cwd)
-  if (recentSection) sections.push(recentSection)
 
   if (sections.length === 0) return null
 
