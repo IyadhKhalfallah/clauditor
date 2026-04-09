@@ -39,7 +39,18 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Check if version already published
+        id: check-npm
+        run: |
+          VERSION="${{ needs.release-please.outputs.version }}"
+          if npm view "@iyadhk/clauditor@${VERSION}" version 2>/dev/null; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} already published to npm, skipping publish"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
       - run: npm publish --provenance --access public
+        if: steps.check-npm.outputs.already_published != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
