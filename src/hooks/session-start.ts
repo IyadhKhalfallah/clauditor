@@ -133,18 +133,8 @@ async function buildSessionStartContext(
       }
     }
 
-    // Remind Claude about CLAUDE.md context
-    if (cwd) {
-      const claudeMdPath = resolve(cwd, 'CLAUDE.md')
-      try {
-        await stat(claudeMdPath)
-        parts.push(
-          `[clauditor]: CLAUDE.md exists in this project. Read it for project conventions and context.`
-        )
-      } catch {
-        // No CLAUDE.md — that's fine
-      }
-    }
+    // CLAUDE.md reminder removed — Claude Code loads CLAUDE.md automatically.
+    // Injecting a reminder wastes tokens without preventing mistakes.
     // Check for repeating workflows that could become skills
     const { SessionStore } = await import('../daemon/store.js')
     const { SessionWatcher } = await import('../daemon/watcher.js')

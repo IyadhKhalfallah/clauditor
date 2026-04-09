@@ -76,6 +76,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   // Resolve cwd — may not be provided by Claude Code in all contexts
   const cwd = input.cwd || null
 
+
   // 1. Compress bash output if applicable
   if (input.tool_name === 'Bash') {
     const toolResponse = input.tool_response || ''
@@ -184,8 +185,9 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       if (cwd) {
         try { recordFileEdit(cwd, filePath, input.session_id) } catch {}
       }
-      // Push file activity to hub
-      hubPush(cwd, [{ type: 'file_activity', content: { file: filePath, action: 'edit' } }])
+      // File activity NOT pushed to hub — low signal, high volume.
+      // 96% of hub fragments were file_activity producing only noise entries.
+      // Local file tracker handles this instead.
     }
   }
 
@@ -270,6 +272,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   return { additionalContext: parts.join('\n\n') }
 }
 
+// ─── Session Health ─────────────────────────────────────────────
 // Track when we last checked health per session to avoid checking on every tool call.
 // Persisted to disk because each hook invocation is a separate process.
 const HEALTH_CHECK_FILE = resolve(homedir(), '.clauditor', 'health-check-ts.json')
