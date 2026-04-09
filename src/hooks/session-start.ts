@@ -114,12 +114,22 @@ async function buildSessionStartContext(
       }
     }
 
-    // Pull team knowledge from hub (if configured for this project)
+    // Sync auto-memory to hub + pull team knowledge (if configured)
     if (cwd) {
       try {
         const { resolveHubContext, pullCoreTier } = await import('../hub/client.js')
         const hub = resolveHubContext(cwd)
         if (hub) {
+          // Sync local auto-memory to hub (fire-and-forget)
+          try {
+            const { readAutoMemory, syncMemoryToHub } = await import('../hub/memory-sync.js')
+            const memories = readAutoMemory(cwd)
+            if (memories.length > 0) {
+              syncMemoryToHub(memories, hub.projectHash, hub.config.developerHash, hub.config).catch(() => {})
+            }
+          } catch {}
+
+          // Pull team knowledge
           const core = await pullCoreTier(hub.projectHash, hub.config)
           if (core?.core) {
             parts.push(
