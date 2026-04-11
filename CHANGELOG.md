@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.28.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.27.1...v1.28.0) (2026-04-11)
+
+
+### Features
+
+* auto-memory sync + structured handoff learnings ([#113](https://github.com/IyadhKhalfallah/clauditor/issues/113)) ([bf2c6d3](https://github.com/IyadhKhalfallah/clauditor/commit/bf2c6d3689c2cf7bf4060ae6a8fce89e88356b62))
+* hub v2 — sync, hooks, reliability, production hardening ([#115](https://github.com/IyadhKhalfallah/clauditor/issues/115)) ([bc9dabf](https://github.com/IyadhKhalfallah/clauditor/commit/bc9dabff25c79ea0a7ac374465468f54e7d5edf2))
+
+
+### Bug Fixes
+
+* data quality improvements — remove noise, stop pushing file_activity ([#111](https://github.com/IyadhKhalfallah/clauditor/issues/111)) ([714a046](https://github.com/IyadhKhalfallah/clauditor/commit/714a046e5584625307ef363da7ee1e4a8b8de327))
+* skip npm publish when version already exists ([#114](https://github.com/IyadhKhalfallah/clauditor/issues/114)) ([8d36664](https://github.com/IyadhKhalfallah/clauditor/commit/8d36664366c34c28f60aac1fbdcf445765b7beed))
+
 ## [1.27.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.27.0...v1.27.1) (2026-04-08)
 
 
