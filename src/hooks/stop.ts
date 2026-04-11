@@ -16,8 +16,14 @@ import { readStdin, outputDecision } from './shared.js'
  * the session to prevent token waste.
  */
 export async function handleStopHook(): Promise<void> {
-  const input = await readStdin()
-  const hookInput = JSON.parse(input) as StopHookInput
+  let hookInput: StopHookInput
+  try {
+    const input = await readStdin()
+    hookInput = JSON.parse(input) as StopHookInput
+  } catch {
+    outputDecision({})
+    return
+  }
 
   // If stop_hook_active is true, another stop hook is already running.
   // Do not block again to prevent infinite loops.
@@ -26,9 +32,12 @@ export async function handleStopHook(): Promise<void> {
     return
   }
 
-  // Check if Claude just wrote a rotation handoff summary
-  // (after PostToolUse blocked with exit code 2, Claude writes a summary)
-  captureRotationHandoff(hookInput)
+  // Await all async hub pushes before outputDecision — process exits after stdout write
+  await Promise.allSettled([
+    captureRotationHandoff(hookInput),
+    pushSubagentSignals(hookInput),
+    reportKnowledgeOutcomes(hookInput),
+  ])
 
   const decision = analyzeForLoop(hookInput)
   outputDecision(decision)
@@ -111,7 +120,7 @@ export function analyzeForLoop(input: StopHookInput): HookDecision {
  * rotation handoff, save it as a rich per-session file — replacing the
  * sparse mechanical extraction that was saved during the block.
  */
-function captureRotationHandoff(input: StopHookInput): void {
+async function captureRotationHandoff(input: StopHookInput): Promise<void> {
   const msg = input.last_assistant_message
   if (!msg || msg.length < 100) return
 
@@ -126,25 +135,10 @@ function captureRotationHandoff(input: StopHookInput): void {
 
   if (!isRotationHandoff) return
 
-  // Extract cwd from transcript
-  let cwd: string | null = null
-  try {
-    const content = readFileSync(input.transcript_path, 'utf-8')
-    const lines = content.split('\n')
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const r = JSON.parse(lines[i])
-        if (r.type === 'user' && r.cwd) {
-          cwd = r.cwd
-          break
-        }
-      } catch {}
-    }
-  } catch {}
+  const cwd = extractCwd(input.transcript_path)
 
   try {
-    // Don't await — stop hook should not block on async scoring
-    savePostCompactSummary(msg, cwd, input.transcript_path || null).catch(() => {})
+    await savePostCompactSummary(msg, cwd, input.transcript_path || null)
 
     logActivity({
       type: 'context_warning',
@@ -155,51 +149,134 @@ function captureRotationHandoff(input: StopHookInput): void {
     process.stderr.write(`clauditor: failed to save rotation handoff: ${err}\n`)
   }
 
-  // Push structured learnings to hub (fire-and-forget, scrubbed)
-  ;(async () => {
-    try {
-      const { resolveHubContext } = await import('../hub/client.js')
-      const { scrubSecrets } = await import('../features/secret-scrubber.js')
-      const { parseStructuredHandoff } = await import('../features/session-state.js')
-      const hub = resolveHubContext(cwd || undefined)
-      if (!hub) return
+  // Push structured learnings to hub (awaited so it completes before process exits)
+  try {
+    const { resolveHubContext } = await import('../hub/client.js')
+    const { scrubSecrets } = await import('../features/secret-scrubber.js')
+    const { parseStructuredHandoff } = await import('../features/session-state.js')
+    const hub = resolveHubContext(cwd || undefined)
+    if (!hub) return
 
-      // Parse structured sections from the handoff
-      const parsed = parseStructuredHandoff(msg)
+    const parsed = parseStructuredHandoff(msg)
 
-      if (parsed.isStructured) {
-        // Convert structured sections to learnings for durable storage
-        const learnings: Array<{ type: string; content: string; tags?: string[] }> = []
+    if (parsed.isStructured) {
+      const learnings: Array<{ type: string; content: string; tags?: string[] }> = []
 
-        for (const item of parsed.failedApproaches) {
-          learnings.push({ type: 'failed_approach', content: scrubSecrets(item).scrubbed })
-        }
-        for (const item of parsed.dependencies) {
-          learnings.push({ type: 'dependency', content: scrubSecrets(item).scrubbed })
-        }
-        for (const item of parsed.decisions) {
-          learnings.push({ type: 'decision', content: scrubSecrets(item).scrubbed })
-        }
-
-        if (learnings.length > 0) {
-          try {
-            await fetch(`${hub.config.url}/api/v1/handoff/learn`, {
-              method: 'POST',
-              headers: {
-                'X-Clauditor-Key': hub.config.apiKey,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                project_hash: hub.projectHash,
-                developer_hash: hub.config.developerHash,
-                learnings,
-              }),
-            })
-          } catch {}
-        }
+      for (const item of parsed.failedApproaches) {
+        learnings.push({ type: 'failed_approach', content: scrubSecrets(item).scrubbed })
       }
-    } catch {}
-  })()
+      for (const item of parsed.dependencies) {
+        learnings.push({ type: 'dependency', content: scrubSecrets(item).scrubbed })
+      }
+      for (const item of parsed.decisions) {
+        learnings.push({ type: 'decision', content: scrubSecrets(item).scrubbed })
+      }
+      for (const item of parsed.whatSurprisedMe) {
+        learnings.push({ type: 'surprise', content: scrubSecrets(item).scrubbed })
+      }
+      for (const item of parsed.gotchas) {
+        learnings.push({ type: 'gotcha', content: scrubSecrets(item).scrubbed })
+      }
+
+      if (learnings.length > 0) {
+        const { queueAndSend } = await import('../hub/push-queue.js')
+        await queueAndSend(
+          `${hub.config.url}/api/v1/handoff/learn`,
+          { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+          {
+            project_hash: hub.projectHash,
+            developer_hash: hub.config.developerHash,
+            project_name: hub.remoteUrl,
+            learnings,
+          }
+        )
+      }
+    }
+  } catch {}
+}
+
+/**
+ * Report knowledge outcomes — did the injected brief help?
+ *
+ * Simple heuristic: if the session didn't hit a loop (healthy),
+ * all injected entries get a positive signal.
+ */
+async function reportKnowledgeOutcomes(input: StopHookInput): Promise<void> {
+  if (input.stop_hook_active) return
+
+  const cwd = extractCwd(input.transcript_path)
+  if (!cwd) return
+
+  try {
+    const { reportOutcomes } = await import('../features/outcome-tracker.js')
+    const reported = await reportOutcomes(input.session_id, cwd, true)
+    if (reported > 0) {
+      logActivity({
+        type: 'notification',
+        session: input.session_id.slice(0, 8),
+        message: `Reported ${reported} positive outcomes for injected knowledge`,
+      }).catch(() => {})
+    }
+  } catch (err) {
+    process.stderr.write(`clauditor: outcome report failed: ${err instanceof Error ? err.message : err}\n`)
+  }
+}
+
+/**
+ * Push subagent metadata from the current session to the hub.
+ * Reads .meta.json files for the session's subagents and sends
+ * descriptions + categories. Fire-and-forget.
+ */
+async function pushSubagentSignals(input: StopHookInput): Promise<void> {
+  const cwd = extractCwd(input.transcript_path)
+  if (!cwd) return
+
+  try {
+    const { resolveHubContext } = await import('../hub/client.js')
+    const hub = resolveHubContext(cwd)
+    if (!hub) return
+
+    const { scanSessionSubagents } = await import('../features/subagent-intel.js')
+    const signals = scanSessionSubagents(cwd, input.session_id)
+    if (signals.length === 0) return
+
+    const { queueAndSend } = await import('../hub/push-queue.js')
+    await queueAndSend(
+      `${hub.config.url}/api/v1/subagents/sync`,
+      { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+      {
+        project_hash: hub.projectHash,
+        developer_hash: hub.config.developerHash,
+        project_name: hub.remoteUrl,
+        signals: signals.map(s => ({
+          session_id: s.sessionId,
+          agent_id: s.agentId,
+          agent_type: s.agentType,
+          description: s.description,
+          category: s.category,
+          files_touched: s.filesTouched,
+          turn_count: s.turnCount,
+        })),
+      }
+    )
+  } catch (err) {
+    process.stderr.write(`clauditor: subagent push failed: ${err instanceof Error ? err.message : err}\n`)
+  }
+}
+
+/** Extract cwd from the last user record in the transcript. */
+function extractCwd(transcriptPath: string): string | null {
+  try {
+    const content = readFileSync(transcriptPath, 'utf-8')
+    const lines = content.split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const r = JSON.parse(lines[i])
+        if (r.type === 'user' && r.cwd) return r.cwd
+      } catch {}
+    }
+  } catch {}
+  return null
 }
 
 function hashValue(value: unknown): string {

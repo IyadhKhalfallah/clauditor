@@ -69,8 +69,14 @@ export function clearOutcomePending(): void {
  * as additional context. Non-blocking — Claude decides whether to use it.
  */
 export async function handlePreToolUseHook(): Promise<void> {
-  const input = await readStdin()
-  const hookInput = JSON.parse(input) as PreToolUseHookInput
+  let hookInput: PreToolUseHookInput
+  try {
+    const input = await readStdin()
+    hookInput = JSON.parse(input) as PreToolUseHookInput
+  } catch {
+    outputDecision({})
+    return
+  }
 
   const decision = await processPreToolUse(hookInput)
   outputDecision(decision)
