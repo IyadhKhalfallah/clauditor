@@ -65,41 +65,110 @@ export function waitForAuth(state: string): Promise<{ result: AuthResult; port: 
         return
       }
 
-      // Send success page to the browser
-      res.writeHead(200, { 'Content-Type': 'text/html' })
+      // Send branded success page
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(`
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>clauditor — logged in</title>
+  <meta charset="utf-8">
+  <title>clauditor — Connected</title>
   <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
       display: flex;
       align-items: center;
       justify-content: center;
       min-height: 100vh;
-      margin: 0;
-      background: #0d0d14;
-      color: #e8e8f0;
+      background: #09090f;
+      color: #ededf0;
     }
-    .card {
+    .container {
       text-align: center;
-      padding: 3rem;
-      background: #181828;
-      border-radius: 1rem;
-      border: 1px solid #2a2a42;
+      max-width: 420px;
+      padding: 0 1.5rem;
     }
-    .check { font-size: 3rem; margin-bottom: 1rem; }
-    h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-    p { color: #9898b0; font-size: 0.875rem; margin: 0; }
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 2rem;
+    }
+    .logo span { color: #f09040; }
+    .card {
+      padding: 2.5rem;
+      background: #111118;
+      border-radius: 1rem;
+      border: 1px solid #1a1a2a;
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: rgba(240, 144, 64, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.5rem;
+      font-size: 1.5rem;
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .team {
+      color: #f09040;
+      font-weight: 600;
+    }
+    .subtitle {
+      color: #a0a0b8;
+      font-size: 0.875rem;
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+    }
+    .steps {
+      text-align: left;
+      background: #07070b;
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      font-size: 0.8rem;
+      color: #a0a0b8;
+      line-height: 1.7;
+    }
+    .steps .done {
+      color: #4ade80;
+    }
+    .steps .next {
+      color: #ededf0;
+      font-weight: 500;
+    }
+    .footer {
+      margin-top: 1.5rem;
+      font-size: 0.75rem;
+      color: #6b6b85;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="check">✓</div>
-    <h1>Logged in to ${teamName}</h1>
-    <p>You can close this tab and return to your terminal.</p>
+  <div class="container">
+    <div class="logo"><span>clauditor</span></div>
+    <div class="card">
+      <div class="icon">&#x2713;</div>
+      <h1>Connected to <span class="team">${teamName}</span></h1>
+      <p class="subtitle">
+        Your AI coding sessions will now share knowledge across your team.
+        Return to your terminal to continue.
+      </p>
+      <div class="steps">
+        <div class="done">&#x2713; Authenticated</div>
+        <div class="done">&#x2713; Team connected</div>
+        <div class="done">&#x2713; Knowledge sync enabled</div>
+        <div class="next">&#x2192; Start a Claude Code session to begin</div>
+      </div>
+    </div>
+    <p class="footer">You can close this tab.</p>
   </div>
 </body>
 </html>
@@ -180,13 +249,20 @@ export async function startAuthServer(state: string): Promise<{
 
       if (!apiKey || !teamName || !teamId) { res.writeHead(400); res.end(); return }
 
-      res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>clauditor</title>
-<style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0d0d14;color:#e8e8f0}
-.c{text-align:center;padding:3rem;background:#181828;border-radius:1rem;border:1px solid #2a2a42}
-.k{font-size:3rem;margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}p{color:#9898b0;font-size:.875rem;margin:0}</style>
-</head><body><div class="c"><div class="k">✓</div><h1>Logged in to ${teamName}</h1><p>You can close this tab.</p></div>
-<script>setTimeout(function(){window.close()},2000)</script></body></html>`)
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>clauditor — Connected</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#09090f;color:#ededf0}
+.ctr{text-align:center;max-width:420px;padding:0 1.5rem}.logo{font-size:1.5rem;font-weight:800;letter-spacing:-0.02em;margin-bottom:2rem}.logo span{color:#f09040}
+.card{padding:2.5rem;background:#111118;border-radius:1rem;border:1px solid #1a1a2a}.icon{width:56px;height:56px;border-radius:16px;background:rgba(240,144,64,0.1);display:flex;align-items:center;justify-content:center;margin:0 auto 1.5rem;font-size:1.5rem;color:#f09040}
+h1{font-size:1.25rem;font-weight:700;margin-bottom:0.5rem}.team{color:#f09040;font-weight:600}.sub{color:#a0a0b8;font-size:0.875rem;line-height:1.5;margin-bottom:1.5rem}
+.steps{text-align:left;background:#07070b;border-radius:0.75rem;padding:1rem 1.25rem;font-size:0.8rem;color:#a0a0b8;line-height:1.7}.done{color:#4ade80}.next{color:#ededf0;font-weight:500}
+.ft{margin-top:1.5rem;font-size:0.75rem;color:#6b6b85}</style>
+</head><body><div class="ctr"><div class="logo"><span>clauditor</span></div><div class="card">
+<div class="icon">&#x2713;</div>
+<h1>Connected to <span class="team">${teamName}</span></h1>
+<p class="sub">Your AI coding sessions will now share knowledge across your team. Return to your terminal to continue.</p>
+<div class="steps"><div class="done">&#x2713; Authenticated</div><div class="done">&#x2713; Team connected</div><div class="done">&#x2713; Knowledge sync enabled</div><div class="next">&#x2192; Start a Claude Code session to begin</div></div>
+</div><p class="ft">You can close this tab.</p></div></body></html>`)
 
       clearTimeout(timeout)
       setTimeout(() => {

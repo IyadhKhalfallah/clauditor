@@ -213,6 +213,31 @@ program
     const isSSH = !!(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT)
     const useDeviceFlow = options.device || isSSH
 
+    // Auto-install hooks if not already installed
+    try {
+      const { existsSync } = await import('node:fs')
+      const { resolve } = await import('node:path')
+      const { homedir } = await import('node:os')
+      const settingsPath = resolve(homedir(), '.claude', 'settings.json')
+      if (existsSync(settingsPath)) {
+        const settings = JSON.parse((await import('node:fs')).readFileSync(settingsPath, 'utf-8'))
+        const hasHooks = settings.hooks && Object.keys(settings.hooks).length > 0
+        if (!hasHooks) {
+          console.log('\n  Setting up clauditor hooks...')
+          const { installHooks } = await import('./install.js')
+          const msgs = await installHooks()
+          msgs.forEach((m: string) => console.log(m))
+        }
+      } else {
+        console.log('\n  Setting up clauditor hooks...')
+        const { installHooks } = await import('./install.js')
+        const msgs = await installHooks()
+        msgs.forEach((m: string) => console.log(m))
+      }
+    } catch {
+      // Non-critical — hooks can be installed manually with `clauditor install`
+    }
+
     if (useDeviceFlow) {
       // Device flow (RFC 8628) — for SSH, headless, or --no-browser
       await loginDeviceFlow(hubUrl, remoteUrl, developerHash)
@@ -226,6 +251,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
   const { createHash } = await import('node:crypto')
   const { startAuthServer } = await import('./hub/auth-server.js')
   const { setProjectHubConfig } = await import('./config.js')
+  const { getProjectHash } = await import('./hub/git-project.js')
 
   const state = createHash('sha256')
     .update(`${Date.now()}:${Math.random()}`)
@@ -260,7 +286,110 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
 
     console.log(`\n  ✓ Logged in to team "${result.teamName}" (${result.plan})`)
     console.log(`  Connected: ${remoteUrl} → ${result.teamName}`)
-    console.log(`\n  Knowledge will sync automatically during sessions on this project.`)
+
+    // Sync local auto-memory + show team brief summary
+    const projectHash = getProjectHash()
+
+    if (projectHash) {
+      // Sync local auto-memory to hub (silent)
+      try {
+        const { readAutoMemory, syncMemoryToHub } = await import('./hub/memory-sync.js')
+        const memories = readAutoMemory(process.cwd())
+        if (memories.length > 0) {
+          const syncResult = await syncMemoryToHub(memories, projectHash, developerHash, { apiKey: result.apiKey, url: hubUrl }, remoteUrl)
+          if (syncResult.synced > 0) {
+            console.log(`  ↑ Synced ${syncResult.synced} local memories to team hub`)
+          }
+        }
+      } catch {}
+
+      // Show brief count (not full entries — could be many)
+      try {
+        const briefRes = await fetch(`${hubUrl}/api/v1/knowledge/brief?project_hash=${projectHash}&max=1`, {
+          headers: { 'X-Clauditor-Key': result.apiKey },
+          signal: AbortSignal.timeout(5000),
+        })
+        if (briefRes.ok) {
+          const briefData = await briefRes.json() as { brief: Array<{ title: string }>; sources?: Record<string, number> }
+          const total = Object.values(briefData.sources || {}).reduce((a, b) => a + b, 0)
+          if (total > 0) {
+            console.log(`  ↓ ${total} team knowledge entries available — will be injected into your sessions`)
+          } else {
+            console.log(`  No team knowledge yet — it will accumulate as you work`)
+          }
+        }
+      } catch {}
+    }
+
+    console.log('')
+
+    // Check if MCP is already configured
+    const mcpBase = 'https://mcp.clauditor.ai'
+    const mcpUrl = `${mcpBase}/mcp?key=${result.apiKey}`
+
+    let mcpAlreadyConfigured = false
+    try {
+      const { readFileSync } = await import('node:fs')
+      const { resolve: resolvePath } = await import('node:path')
+      const { homedir } = await import('node:os')
+      const claudeJson = JSON.parse(readFileSync(resolvePath(homedir(), '.claude.json'), 'utf-8'))
+      mcpAlreadyConfigured = !!claudeJson?.mcpServers?.clauditor
+    } catch {}
+
+    if (mcpAlreadyConfigured) {
+      console.log(`  ✓ MCP already configured`)
+    } else {
+      // Verify MCP server is reachable
+      let mcpAvailable = false
+      try {
+        const verifyRes = await fetch(`${mcpBase}/health`, { signal: AbortSignal.timeout(5000) })
+        if (verifyRes.ok) {
+          mcpAvailable = true
+        }
+      } catch {}
+
+      if (mcpAvailable) {
+        const readline = await import('node:readline')
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+        const answer = await new Promise<string>((resolve) => {
+          rl.question('  Set up MCP so Claude can query team knowledge mid-session? (Y/n) ', (ans) => {
+            rl.close()
+            resolve(ans.trim().toLowerCase())
+          })
+        })
+
+        if (answer !== 'n' && answer !== 'no') {
+          try {
+            const { execSync } = await import('node:child_process')
+            try { execSync('claude mcp remove clauditor 2>/dev/null', { stdio: 'ignore' }) } catch {}
+            execSync(`claude mcp add --transport http -s user clauditor "${mcpUrl}"`, { stdio: 'inherit' })
+            console.log(`  ✓ MCP configured — start a new Claude Code session to use it`)
+          } catch {
+            try {
+              const { readFileSync, writeFileSync } = await import('node:fs')
+              const { resolve: resolvePath } = await import('node:path')
+              const { homedir } = await import('node:os')
+              const settingsPath = resolvePath(homedir(), '.claude', 'settings.json')
+
+              let settings: Record<string, unknown> = {}
+              try { settings = JSON.parse(readFileSync(settingsPath, 'utf-8')) } catch {}
+
+              const mcpServers = (settings.mcpServers || {}) as Record<string, unknown>
+              mcpServers.clauditor = { type: 'http', url: mcpUrl }
+              settings.mcpServers = mcpServers
+              writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+              console.log(`  ✓ MCP configured via settings.json — start a new Claude Code session to use it`)
+            } catch {
+              console.log(`\n  To set up MCP manually, run:`)
+              console.log(`  claude mcp add --transport http -s user clauditor "${mcpUrl}"`)
+            }
+          }
+        } else {
+          console.log(`\n  You can set up MCP later with:`)
+          console.log(`  claude mcp add --transport http -s user clauditor "${mcpUrl}"`)
+        }
+      }
+    }
   } catch (err) {
     console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
     process.exit(1)
@@ -299,6 +428,180 @@ async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash:
     process.exit(1)
   }
 }
+
+// ─── clauditor sync ──────────────────────────────────────────────
+
+program
+  .command('sync')
+  .description('Sync local knowledge to the hub (auto-memory, session handoffs, pending queue)')
+  .action(async () => {
+    const { resolveHubContext } = await import('./hub/client.js')
+    const hub = resolveHubContext()
+    if (!hub) {
+      console.error('\n  ✗ Not connected to a hub. Run `clauditor login` first.')
+      process.exit(1)
+    }
+
+    console.log(`\n  Syncing to ${hub.config.teamName || 'hub'}...`)
+
+    let totalPushed = 0
+
+    // 1. Sync auto-memory
+    try {
+      const { readAutoMemory, syncMemoryToHub } = await import('./hub/memory-sync.js')
+      const memories = readAutoMemory(process.cwd())
+      if (memories.length > 0) {
+        const result = await syncMemoryToHub(memories, hub.projectHash, hub.config.developerHash, hub.config, hub.remoteUrl)
+        if (result.synced > 0) {
+          console.log(`  ↑ ${result.synced} auto-memories synced`)
+          totalPushed += result.synced
+        } else {
+          console.log(`  · Auto-memories already up to date`)
+        }
+      } else {
+        console.log(`  · No local auto-memories found`)
+      }
+    } catch (err) {
+      console.error(`  ✗ Auto-memory sync failed: ${err instanceof Error ? err.message : err}`)
+    }
+
+    // 2. Push session handoffs — structured learnings + summaries as team memories
+    try {
+      const { readRecentHandoffs, parseStructuredHandoff } = await import('./features/session-state.js')
+      const { scrubSecrets } = await import('./features/secret-scrubber.js')
+      const { queueAndSend } = await import('./hub/push-queue.js')
+      const { createHash } = await import('node:crypto')
+      const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
+      const { resolve } = await import('node:path')
+
+      // Track which handoffs have been synced (by content hash)
+      const syncedFile = resolve(homedir(), '.clauditor', 'synced-handoffs.json')
+      let syncedHashes: string[] = []
+      try { syncedHashes = JSON.parse(readFileSync(syncedFile, 'utf-8')) } catch {}
+
+      const handoffs = readRecentHandoffs(process.cwd())
+      let handoffLearnings = 0
+      let summariesPushed = 0
+      const newHashes: string[] = []
+
+      for (const handoff of handoffs) {
+        const scrubbed = scrubSecrets(handoff.content).scrubbed
+        const contentHash = createHash('sha256').update(scrubbed).digest('hex').slice(0, 16)
+
+        // Skip if already synced
+        if (syncedHashes.includes(contentHash)) continue
+
+        // Push structured learnings if present
+        const parsed = parseStructuredHandoff(handoff.content)
+        if (parsed.isStructured) {
+          const learnings: Array<{ type: string; content: string }> = []
+          for (const item of parsed.failedApproaches) {
+            learnings.push({ type: 'failed_approach', content: scrubSecrets(item).scrubbed })
+          }
+          for (const item of parsed.dependencies) {
+            learnings.push({ type: 'dependency', content: scrubSecrets(item).scrubbed })
+          }
+          for (const item of parsed.decisions) {
+            learnings.push({ type: 'decision', content: scrubSecrets(item).scrubbed })
+          }
+          for (const item of parsed.whatSurprisedMe) {
+            learnings.push({ type: 'surprise', content: scrubSecrets(item).scrubbed })
+          }
+          for (const item of parsed.gotchas) {
+            learnings.push({ type: 'gotcha', content: scrubSecrets(item).scrubbed })
+          }
+
+          if (learnings.length > 0) {
+            await queueAndSend(
+              `${hub.config.url}/api/v1/handoff/learn`,
+              { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+              {
+                project_hash: hub.projectHash,
+                developer_hash: hub.config.developerHash,
+                project_name: hub.remoteUrl,
+                learnings,
+              }
+            )
+            handoffLearnings += learnings.length
+          }
+        }
+
+        // Push full summary as team memory (direct fetch so we can report errors)
+        if (scrubbed.length >= 100) {
+          const filename = handoff.path.split('/').pop()?.replace('.md', '') || 'unknown'
+          const memPayload = {
+            project_hash: hub.projectHash,
+            developer_hash: hub.config.developerHash,
+            project_name: hub.remoteUrl,
+            memories: [{
+              name: `Session summary (${filename})`,
+              description: 'Session summary captured at compaction',
+              memory_type: 'session_summary',
+              content: scrubbed,
+              content_hash: contentHash,
+              source_file: `session_${contentHash}`,
+              scope: 'team',
+            }],
+          }
+          try {
+            const res = await fetch(`${hub.config.url}/api/v1/memory/sync`, {
+              method: 'POST',
+              headers: { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+              body: JSON.stringify(memPayload),
+              signal: AbortSignal.timeout(15000),
+            })
+            const data = await res.json() as { synced?: number; skipped?: number; error?: string }
+            if (res.ok && data.synced && data.synced > 0) {
+              summariesPushed++
+            } else {
+              console.error(`  ✗ Summary push failed: ${data.error || `synced=${data.synced} skipped=${data.skipped}`}`)
+            }
+          } catch (err) {
+            console.error(`  ✗ Summary push error: ${err instanceof Error ? err.message : err}`)
+          }
+        }
+
+        newHashes.push(contentHash)
+      }
+
+      // Persist synced hashes
+      if (newHashes.length > 0) {
+        const allHashes = [...new Set([...syncedHashes, ...newHashes])].slice(-200) // keep last 200
+        mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
+        writeFileSync(syncedFile, JSON.stringify(allHashes))
+      }
+
+      if (handoffLearnings > 0) {
+        console.log(`  ↑ ${handoffLearnings} structured learnings from handoffs`)
+        totalPushed += handoffLearnings
+      }
+      if (summariesPushed > 0) {
+        console.log(`  ↑ ${summariesPushed} session summary/summaries synced as team memories`)
+        totalPushed += summariesPushed
+      }
+      if (handoffLearnings === 0 && summariesPushed === 0 && handoffs.length === 0) {
+        console.log(`  · No recent session handoffs found`)
+      }
+    } catch (err) {
+      console.error(`  ✗ Handoff sync failed: ${err instanceof Error ? err.message : err}`)
+    }
+
+    // 3. Flush push queue (retries for anything that failed earlier)
+    try {
+      const { flushQueue } = await import('./hub/push-queue.js')
+      const flushed = await flushQueue()
+      if (flushed > 0) {
+        console.log(`  ↑ ${flushed} queued item(s) flushed`)
+        totalPushed += flushed
+      }
+    } catch {}
+
+    if (totalPushed > 0) {
+      console.log(`\n  ✓ Synced ${totalPushed} item(s) to hub`)
+    } else {
+      console.log(`\n  ✓ Everything up to date`)
+    }
+  })
 
 // ─── clauditor stats ─────────────────────────────────────────────
 
