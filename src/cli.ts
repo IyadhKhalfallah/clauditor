@@ -589,10 +589,10 @@ program
     // 3. Flush push queue (retries for anything that failed earlier)
     try {
       const { flushQueue } = await import('./hub/push-queue.js')
-      const flushed = await flushQueue()
-      if (flushed > 0) {
-        console.log(`  ↑ ${flushed} queued item(s) flushed`)
-        totalPushed += flushed
+      const { sent } = await flushQueue()
+      if (sent > 0) {
+        console.log(`  ↑ ${sent} queued item(s) flushed`)
+        totalPushed += sent
       }
     } catch {}
 
