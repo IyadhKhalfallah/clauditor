@@ -32,12 +32,13 @@ export async function handleSessionStartHook(): Promise<void> {
   // Prune stale state files — lightweight, runs once per session start
   try { pruneStaleStateFiles() } catch {}
 
-  const context = await buildSessionStartContext(hookInput.cwd)
+  const context = await buildSessionStartContext(hookInput.cwd, hookInput.session_id)
   outputDecision(context)
 }
 
 async function buildSessionStartContext(
-  cwd?: string
+  cwd?: string,
+  sessionId?: string,
 ): Promise<HookDecision> {
   const parts: string[] = []
 
@@ -120,23 +121,54 @@ async function buildSessionStartContext(
         const { resolveHubContext, pullCoreTier } = await import('../hub/client.js')
         const hub = resolveHubContext(cwd)
         if (hub) {
+          // Flush any queued pushes from previous sessions (retry failed sends)
+          try {
+            const { flushQueue } = await import('../hub/push-queue.js')
+            flushQueue().catch(() => {})
+          } catch {}
+
           // Sync local auto-memory to hub (fire-and-forget)
           try {
             const { readAutoMemory, syncMemoryToHub } = await import('../hub/memory-sync.js')
             const memories = readAutoMemory(cwd)
             if (memories.length > 0) {
-              syncMemoryToHub(memories, hub.projectHash, hub.config.developerHash, hub.config).catch(() => {})
+              syncMemoryToHub(memories, hub.projectHash, hub.config.developerHash, hub.config, hub.remoteUrl).catch(() => {})
             }
           } catch {}
 
-          // Pull team knowledge
-          const core = await pullCoreTier(hub.projectHash, hub.config)
-          if (core?.core) {
-            parts.push(
-              `[clauditor hub — team knowledge]:\n` +
-              core.core
+          // Pull knowledge brief — top 5 things to know about this project
+          try {
+            const briefController = new AbortController()
+            const briefTimeout = setTimeout(() => briefController.abort(), 5000)
+            const briefRes = await fetch(
+              `${hub.config.url}/api/v1/knowledge/brief?project_hash=${hub.projectHash}&max=5`,
+              { headers: { 'X-Clauditor-Key': hub.config.apiKey }, signal: briefController.signal }
             )
-          }
+            clearTimeout(briefTimeout)
+            if (briefRes.ok) {
+              const briefData = await briefRes.json() as {
+                brief: Array<{ id: string | null; title: string; content: string; score: number; reason: string }>
+              }
+              if (briefData.brief?.length > 0) {
+                const lines = briefData.brief.map((item, i) =>
+                  `${i + 1}. ${item.title}\n   ${item.content.slice(0, 150).replace(/\n/g, ' ')}`
+                )
+                parts.push(
+                  `[clauditor — what your team learned about this project]:\n` +
+                  lines.join('\n\n')
+                )
+
+                // Record injected entry IDs for outcome tracking
+                const entryIds = briefData.brief.map(b => b.id).filter((id): id is string => id !== null)
+                if (entryIds.length > 0) {
+                  try {
+                    const { recordInjection } = await import('../features/outcome-tracker.js')
+                    recordInjection(sessionId || 'unknown', entryIds)
+                  } catch {}
+                }
+              }
+            }
+          } catch {}
         }
       } catch {
         // Hub unavailable — local knowledge is enough
@@ -148,7 +180,7 @@ async function buildSessionStartContext(
     // Check for repeating workflows that could become skills
     const { SessionStore } = await import('../daemon/store.js')
     const { SessionWatcher } = await import('../daemon/watcher.js')
-    const { detectWorkflowPatterns, generateSkillSuggestions } = await import('../features/skill-suggest.js')
+    const { detectWorkflowPatterns, generateSkillSuggestions, generateSubagentSkillSuggestions } = await import('../features/skill-suggest.js')
 
     const store = new SessionStore()
     const watcher = new SessionWatcher(store, { projectsDir })
@@ -157,6 +189,18 @@ async function buildSessionStartContext(
     const sessions = store.getAll()
     const patterns = detectWorkflowPatterns(sessions)
     const suggestions = generateSkillSuggestions(patterns)
+
+    // Also check subagent patterns for skill candidates
+    if (cwd) {
+      try {
+        const { scanSubagents } = await import('../features/subagent-intel.js')
+        const subagentSummary = scanSubagents(cwd)
+        if (subagentSummary.total > 0) {
+          const subagentSuggestions = generateSubagentSkillSuggestions(subagentSummary.signals)
+          suggestions.push(...subagentSuggestions)
+        }
+      } catch {}
+    }
 
     if (suggestions.length > 0) {
       // Only inject the top suggestion to avoid noise

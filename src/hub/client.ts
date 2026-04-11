@@ -33,6 +33,7 @@ async function hubFetch(
   const url = `${hubConfig.url}${path}`
   const res = await fetch(url, {
     ...options,
+    signal: options.signal || AbortSignal.timeout(15000),
     headers: {
       'X-Clauditor-Key': hubConfig.apiKey,
       'Content-Type': 'application/json',

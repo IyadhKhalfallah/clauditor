@@ -29,8 +29,14 @@ import { readStdin, outputDecision, writeJsonFileAtomic, readJsonFile } from './
  * (inside Claude Code) instead of requiring a separate dashboard.
  */
 export async function handlePostToolUseHook(): Promise<void> {
-  const input = await readStdin()
-  const hookInput = JSON.parse(input) as PostToolUseHookInput
+  let hookInput: PostToolUseHookInput
+  try {
+    const input = await readStdin()
+    hookInput = JSON.parse(input) as PostToolUseHookInput
+  } catch {
+    outputDecision({})
+    return
+  }
 
   const decision = await processToolResult(hookInput)
 
@@ -69,7 +75,9 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
           content: scrubFragmentContent(f.content).content,
         }))
         await pushKnowledge(hub.projectHash, hub.config.developerHash, scrubbed, hub.config, hub.remoteUrl)
-      } catch {}
+      } catch (err) {
+        process.stderr.write(`clauditor: hub push failed: ${err instanceof Error ? err.message : err}\n`)
+      }
     })())
   }
 
@@ -118,17 +126,35 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       try {
         const fixResult = recordFix(cwd, input.tool_input.command)
         if (fixResult) {
-          // Push the fix to the hub so team members learn from it
-          hubPush(cwd, [{
-            type: 'error',
-            content: {
-              command: fixResult.command,
-              error_message: fixResult.error,
-              fix: fixResult.fix,
-            },
-          }])
+          // Push the fix as a durable knowledge entry (not a fragment)
+          hubPushes.push((async () => {
+            try {
+              const { resolveHubContext } = await import('../hub/client.js')
+              const { scrubSecrets } = await import('../features/secret-scrubber.js')
+              const hub = resolveHubContext(cwd)
+              if (!hub) return
+              const { queueAndSend } = await import('../hub/push-queue.js')
+              await queueAndSend(
+                `${hub.config.url}/api/v1/handoff/learn`,
+                { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+                {
+                  project_hash: hub.projectHash,
+                  developer_hash: hub.config.developerHash,
+                  project_name: hub.remoteUrl,
+                  learnings: [{
+                    type: 'error_fix',
+                    content: scrubSecrets(`${fixResult.command} failed with: ${fixResult.error}\nFix: ${fixResult.fix}`).scrubbed,
+                  }],
+                }
+              )
+            } catch (err) {
+              process.stderr.write(`clauditor: error-fix hub push failed: ${err instanceof Error ? err.message : err}\n`)
+            }
+          })())
         }
-      } catch {}
+      } catch (err) {
+        process.stderr.write(`clauditor: error capture failed: ${err instanceof Error ? err.message : err}\n`)
+      }
     }
 
     // Push errors to hub (local recording already handled above)
@@ -162,8 +188,11 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
                   method: 'POST',
                   headers: { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
                   body: JSON.stringify({ entry_ids: pending.hubEntryIds, outcome }),
+                  signal: AbortSignal.timeout(10000),
                 })
-              } catch {}
+              } catch (err) {
+                process.stderr.write(`clauditor: outcome push failed: ${err instanceof Error ? err.message : err}\n`)
+              }
             })())
           }
 
@@ -239,7 +268,25 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
             )
           }
         }
-      } catch {}
+      } catch (err) {
+        process.stderr.write(`clauditor: hub file knowledge query failed: ${err instanceof Error ? err.message : err}\n`)
+      }
+    }
+  }
+
+  // 2c. Gotcha injection for Read/View — fire-and-forget, rate-limited per file per session
+  if (input.tool_name === 'Read' || input.tool_name === 'View') {
+    const filePath = (input.tool_input?.file_path as string) || ''
+    if (filePath && cwd && !hasCheckedGotcha(input.session_id, filePath)) {
+      markGotchaChecked(input.session_id, filePath)
+      // Fire-and-forget: push the gotcha query into hubPushes so we await it
+      // before process exit, but don't block the main hook path.
+      hubPushes.push((async () => {
+        const gotchaCtx = await queryGotchasForFile(cwd, filePath)
+        if (gotchaCtx) {
+          parts.push(gotchaCtx)
+        }
+      })())
     }
   }
 
@@ -598,12 +645,20 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
 
   if (wasteFactor < cal.wasteThreshold) return null
 
-  // Re-block at every 2x increase: if we blocked at 5x, block again at 7x, 9x, etc.
-  // Tracks the waste level when last blocked, not just true/false.
+  // Re-block logic: track the waste level when last blocked.
+  // If waste dropped significantly (compaction happened), reset and block again.
+  // Otherwise, only re-block at every 2x increase to avoid spamming.
   const blockedAt = readJsonFile<Record<string, number>>(BLOCK_NUDGE_FILE, {})
   const key = `post-${sessionId}`
   const lastBlockedWaste = blockedAt[key] || 0
-  if (lastBlockedWaste > 0 && wasteFactor < lastBlockedWaste + 2) return null
+  if (lastBlockedWaste > 0) {
+    // Waste dropped by more than half → compaction happened, reset and re-block
+    if (wasteFactor < lastBlockedWaste / 2) {
+      // Reset — will proceed to block below
+    } else if (wasteFactor < lastBlockedWaste + 2) {
+      return null
+    }
+  }
 
   // Mark as blocked at this waste level
   blockedAt[key] = wasteFactor
@@ -640,6 +695,8 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
       `DECISIONS:\n- (choices made and why, e.g. "chose X over Y because Z")\n\n` +
       `USER_PREFERENCES:\n- (anything the user explicitly asked for or rejected)\n\n` +
       `BLOCKERS:\n- (unresolved issues, things that need user input)\n\n` +
+      `WHAT_SURPRISED_ME:\n- (unexpected behavior, undocumented quirks)\n\n` +
+      `GOTCHAS:\n- (file: path/to/file — specific warning about this file)\n\n` +
       `3. In the new session, tell the user to just say "continue where I left off" — clauditor will inject the saved context automatically.\n` +
       `4. Include the marker [clauditor-rotation] at the end of your response so clauditor can capture your summary.`,
   }
@@ -647,7 +704,55 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
 
 const BLOCK_NUDGE_FILE = resolve(homedir(), '.clauditor', 'prompt-block-nudge.json')
 
+// ─── Gotcha Check ──────────────────────────────────────────────
+// Rate limit: max 1 gotcha check per file per session.
+// Persisted to disk because each hook invocation is a separate process.
+const GOTCHA_CHECKED_FILE = resolve(homedir(), '.clauditor', 'gotcha-checked.json')
 
+function hasCheckedGotcha(sessionId: string, filePath: string): boolean {
+  const data = readJsonFile<Record<string, string[]>>(GOTCHA_CHECKED_FILE, {})
+  return (data[sessionId] || []).includes(filePath)
+}
+
+function markGotchaChecked(sessionId: string, filePath: string): void {
+  const data = readJsonFile<Record<string, string[]>>(GOTCHA_CHECKED_FILE, {})
+  if (!data[sessionId]) data[sessionId] = []
+  if (!data[sessionId].includes(filePath)) {
+    data[sessionId].push(filePath)
+  }
+  try { writeJsonFileAtomic(GOTCHA_CHECKED_FILE, data) } catch {}
+}
+
+/**
+ * Fire-and-forget gotcha query for a file.
+ * Queries GET /api/v1/gotchas?project_hash=X&filepath=Y
+ * Returns additionalContext string if gotchas found, null otherwise.
+ */
+async function queryGotchasForFile(cwd: string, filePath: string): Promise<string | null> {
+  try {
+    const { resolveHubContext } = await import('../hub/client.js')
+    const hub = resolveHubContext(cwd)
+    if (!hub) return null
+
+    const url = `${hub.config.url}/api/v1/gotchas?project_hash=${encodeURIComponent(hub.projectHash)}&filepath=${encodeURIComponent(filePath)}`
+    const res = await fetch(url, {
+      headers: { 'X-Clauditor-Key': hub.config.apiKey, 'Content-Type': 'application/json' },
+    })
+    if (!res.ok) return null
+
+    const data = (await res.json()) as { gotchas?: Array<{ title: string; description: string; solution?: string }> }
+    if (!data.gotchas || data.gotchas.length === 0) return null
+
+    const lines = data.gotchas.map((g) =>
+      `- **${g.title}**: ${g.description}${g.solution ? ` → ${g.solution}` : ''}`
+    )
+    return (
+      `[clauditor hub — gotchas for \`${filePath.split('/').pop()}\`]:\n` + lines.join('\n')
+    )
+  } catch {
+    return null
+  }
+}
 
 const ERROR_PATTERNS = [
   /error:/i,
