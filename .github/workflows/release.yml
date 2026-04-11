@@ -62,17 +62,19 @@ jobs:
           TARBALL_URL="https://registry.npmjs.org/@iyadhk/clauditor/-/clauditor-${VERSION}.tgz"
 
           # Wait for npm registry to serve the correct version
+          TARBALL_FILE=$(mktemp)
           for i in $(seq 1 10); do
-            TARBALL=$(curl -sL "$TARBALL_URL")
-            FOUND_VERSION=$(echo "$TARBALL" | tar xzf - --to-stdout package/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*: *"//;s/".*//')
+            curl -sL "$TARBALL_URL" -o "$TARBALL_FILE"
+            FOUND_VERSION=$(tar xzf "$TARBALL_FILE" --to-stdout package/package.json 2>/dev/null | grep '"version"' | head -1 | sed 's/.*: *"//;s/".*//')
             if [ "$FOUND_VERSION" = "$VERSION" ]; then
-              SHA256=$(echo "$TARBALL" | shasum -a 256 | awk '{print $1}')
+              SHA256=$(shasum -a 256 "$TARBALL_FILE" | awk '{print $1}')
               echo "Verified tarball version ${VERSION} with SHA ${SHA256}"
               break
             fi
             echo "npm returned version '${FOUND_VERSION}' instead of '${VERSION}' (attempt $i/10)..."
             sleep 30
           done
+          rm -f "$TARBALL_FILE"
 
           if [ -z "$SHA256" ]; then
             echo "::error::Failed to get correct tarball from npm after 10 attempts"
