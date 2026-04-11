@@ -214,5 +214,116 @@ export async function formatImpactStats(stats: ImpactStats): Promise<string> {
       lines.push(`  ${stats.detected.contextOverflows} session${stats.detected.contextOverflows === 1 ? '' : 's'} near context limit`)
   }
 
+  // Knowledge & subagent intelligence (local data)
+  try {
+    const knowledgeLines = await formatKnowledgeStats()
+    if (knowledgeLines.length > 0) {
+      lines.push('')
+      lines.push(...knowledgeLines)
+    }
+  } catch {}
+
   return lines.join('\n')
+}
+
+/**
+ * Gather knowledge and subagent stats from local data.
+ */
+async function formatKnowledgeStats(): Promise<string[]> {
+  const lines: string[] = []
+  const cwd = process.cwd()
+
+  // Error/fix pairs
+  try {
+    const { readdirSync, readFileSync, existsSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const { homedir } = await import('node:os')
+
+    const knowledgeDir = resolve(homedir(), '.clauditor', 'knowledge')
+    if (existsSync(knowledgeDir)) {
+      let totalErrors = 0
+      let totalWithFix = 0
+      const dirs = readdirSync(knowledgeDir, { withFileTypes: true })
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue
+        const errorsPath = resolve(knowledgeDir, dir.name, 'errors.json')
+        if (!existsSync(errorsPath)) continue
+        try {
+          const data = JSON.parse(readFileSync(errorsPath, 'utf-8'))
+          const entries = Object.values(data) as Array<{ fix?: string; fixCommands?: string[] }>
+          totalErrors += entries.length
+          totalWithFix += entries.filter(e => e.fix || (e.fixCommands && e.fixCommands.length > 0)).length
+        } catch {}
+      }
+
+      if (totalErrors > 0) {
+        lines.push('  KNOWLEDGE (local)')
+        lines.push('  ─────────────────')
+        lines.push(`  Error/fix pairs:      ${totalErrors} recorded (${totalWithFix} with fixes)`)
+      }
+    }
+  } catch {}
+
+  // Subagent intelligence
+  try {
+    const { scanSubagents, detectPatterns } = await import('./subagent-intel.js')
+    const summary = scanSubagents(cwd)
+
+    if (summary.total > 0) {
+      if (lines.length === 0) {
+        lines.push('  KNOWLEDGE (local)')
+        lines.push('  ─────────────────')
+      }
+      lines.push(`  Subagents spawned:    ${summary.total} across ${new Set(summary.signals.map(s => s.sessionId)).size} sessions`)
+
+      // Top categories
+      const sorted = Object.entries(summary.byCategory)
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+      if (sorted.length > 0) {
+        lines.push(`  Top agent tasks:      ${sorted.map(([k, v]) => `${k} (${v})`).join(', ')}`)
+      }
+
+      // Recurring patterns
+      const patterns = detectPatterns(summary.signals)
+      if (patterns.length > 0) {
+        lines.push(`  Recurring patterns:   ${patterns.length} detected`)
+        for (const p of patterns.slice(0, 2)) {
+          lines.push(`    ${p.count}x "${p.descriptions[0]}"`)
+        }
+      }
+    }
+  } catch {}
+
+  // Hub stats (if configured)
+  try {
+    const { resolveHubContext } = await import('../hub/client.js')
+    const hub = resolveHubContext(cwd)
+    if (hub) {
+      const [memRes, subRes] = await Promise.all([
+        fetch(`${hub.config.url}/api/v1/memory/query?project_hash=${hub.projectHash}`, {
+          headers: { 'X-Clauditor-Key': hub.config.apiKey },
+        }).catch(() => null),
+        fetch(`${hub.config.url}/api/v1/subagents/query?project_hash=${hub.projectHash}`, {
+          headers: { 'X-Clauditor-Key': hub.config.apiKey },
+        }).catch(() => null),
+      ])
+
+      const memData = memRes?.ok ? await memRes.json() as { count: number } : null
+      const subData = subRes?.ok ? await subRes.json() as { summary: { total: number; by_category: Record<string, number> } } : null
+
+      if (memData || subData) {
+        lines.push('')
+        lines.push('  TEAM HUB')
+        lines.push('  ────────')
+        if (memData && memData.count > 0)
+          lines.push(`  Team memories shared: ${memData.count}`)
+        if (subData && subData.summary.total > 0)
+          lines.push(`  Subagent signals:     ${subData.summary.total}`)
+      }
+    }
+  } catch {}
+
+  return lines
 }

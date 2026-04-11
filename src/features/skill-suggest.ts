@@ -1,4 +1,5 @@
 import type { SessionState, TurnMetrics, ToolCallSummary } from '../types.js'
+import type { SubagentSignal } from './subagent-intel.js'
 
 export interface WorkflowPattern {
   /** Normalized sequence of tool calls */
@@ -224,6 +225,57 @@ function deduplicatePatterns(patterns: WorkflowPattern[]): WorkflowPattern[] {
   }
 
   return result
+}
+
+/**
+ * Generate skill suggestions from subagent patterns.
+ *
+ * Subagent descriptions are the richest signal for recurring workflows.
+ * "Fix post-merge build errors" appearing 3+ times across sessions
+ * is a strong candidate for a skill.
+ */
+export function generateSubagentSkillSuggestions(
+  signals: SubagentSignal[],
+  minOccurrences = 3
+): SkillSuggestion[] {
+  // Import here to avoid circular deps at module level
+  const { detectPatterns } = require('./subagent-intel.js') as typeof import('./subagent-intel.js')
+
+  const patterns = detectPatterns(signals)
+  const suggestions: SkillSuggestion[] = []
+
+  for (const pattern of patterns) {
+    if (pattern.count < minOccurrences) continue
+
+    const name = pattern.pattern
+      .replace(/\b(batch|group)\s*n\b/gi, '')
+      .replace(/[^a-z0-9\s]/gi, '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .join('-')
+      .toLowerCase() || 'workflow'
+
+    const prompt =
+      `[clauditor — skill suggestion from agent patterns]: Claude spawned agents for "${pattern.descriptions[0]}" ` +
+      `${pattern.count} times across sessions.\n\n` +
+      `Ask the user: "I noticed you frequently need '${pattern.descriptions[0]}'. ` +
+      `Want me to create a /${name} skill so this runs automatically?"\n\n` +
+      `If the user agrees, create .claude/skills/${name}/SKILL.md.`
+
+    suggestions.push({
+      name,
+      pattern: {
+        steps: [{ tool: 'Agent', input: pattern.descriptions[0] }],
+        sessionCount: pattern.count,
+        seenIn: pattern.descriptions.slice(0, 5),
+        fingerprint: `subagent:${pattern.pattern}`,
+      },
+      prompt,
+    })
+  }
+
+  return suggestions.slice(0, 3)
 }
 
 /**
