@@ -88,7 +88,8 @@ export async function syncMemoryToHub(
   entries: MemoryEntry[],
   projectHash: string,
   developerHash: string,
-  hubConfig: { apiKey: string; url: string }
+  hubConfig: { apiKey: string; url: string },
+  projectName?: string
 ): Promise<{ synced: number; skipped: number }> {
   if (entries.length === 0) return { synced: 0, skipped: 0 }
 
@@ -103,7 +104,9 @@ export async function syncMemoryToHub(
         project_hash: projectHash,
         developer_hash: developerHash,
         memories: entries,
+        project_name: projectName || null,
       }),
+      signal: AbortSignal.timeout(15000),
     })
 
     if (!res.ok) return { synced: 0, skipped: entries.length }
@@ -116,30 +119,30 @@ export async function syncMemoryToHub(
 // ─── Helpers ────────────────────────────────────────────────
 
 function findMemoryDir(cwd: string, claudeProjectsDir: string): string | null {
-  // Claude Code encodes the project path as the directory name
-  // Try to find a matching directory
+  // Claude Code encodes the project path: replace non-alphanumeric with '-'
+  // Try exact match first, then fallback to fuzzy
   try {
+    const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-')
+
+    // Exact match (preferred)
+    const exactPath = resolve(claudeProjectsDir, encoded, 'memory')
+    if (existsSync(exactPath)) return exactPath
+
+    // Collapsed hyphens variant
+    const collapsed = encoded.replace(/-+/g, '-').slice(0, 100)
+    const collapsedPath = resolve(claudeProjectsDir, collapsed, 'memory')
+    if (existsSync(collapsedPath)) return collapsedPath
+
+    // Fuzzy match — but require full encoded name match, not just prefix
     const dirs = readdirSync(claudeProjectsDir, { withFileTypes: true })
       .filter((d) => d.isDirectory())
 
     for (const dir of dirs) {
-      // The directory name is an encoded version of the project path
-      // Check if this directory contains a memory/ subfolder
       const memPath = resolve(claudeProjectsDir, dir.name, 'memory')
-      if (existsSync(memPath)) {
-        // Check if this directory matches our cwd by decoding
-        // Claude Code uses: cwd.replace(/[^a-zA-Z0-9]/g, '-')
-        const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-')
-        if (dir.name.includes(encoded.slice(0, 30)) || encoded.includes(dir.name.slice(0, 30))) {
-          return memPath
-        }
+      if (existsSync(memPath) && dir.name === encoded) {
+        return memPath
       }
     }
-
-    // Fallback: try direct encoding
-    const encoded = cwd.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 100)
-    const directPath = resolve(claudeProjectsDir, encoded, 'memory')
-    if (existsSync(directPath)) return directPath
   } catch {}
 
   return null

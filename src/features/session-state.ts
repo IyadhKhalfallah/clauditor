@@ -328,25 +328,30 @@ export function extractHandoffDescription(handoff: HandoffFile): string {
  * cross-project handoffs are always visible.
  * Returns them sorted by timestamp, most recent first.
  */
-export function readRecentHandoffs(_cwd?: string | null): HandoffFile[] {
+export function readRecentHandoffs(cwd?: string | null): HandoffFile[] {
   const results: HandoffFile[] = []
   const cutoff = Date.now() - MAX_HANDOFF_AGE_MS
 
-  // Scan all project subdirectories under SESSIONS_DIR
+  // If cwd is provided, only scan that project's directory
   const dirsToScan: string[] = []
-  try {
-    const entries = readdirSync(SESSIONS_DIR, { withFileTypes: true })
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        dirsToScan.push(resolve(SESSIONS_DIR, entry.name))
+  if (cwd) {
+    const projectDir = resolve(SESSIONS_DIR, encodeCwd(cwd))
+    dirsToScan.push(projectDir)
+  } else {
+    // Scan all project subdirectories under SESSIONS_DIR
+    try {
+      const entries = readdirSync(SESSIONS_DIR, { withFileTypes: true })
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          dirsToScan.push(resolve(SESSIONS_DIR, entry.name))
+        }
       }
+    } catch {
+      // Sessions dir doesn't exist yet
     }
-  } catch {
-    // Sessions dir doesn't exist yet
+    // Also scan the root sessions dir (for files saved without cwd)
+    dirsToScan.push(SESSIONS_DIR)
   }
-
-  // Also scan the root sessions dir (for files saved without cwd)
-  dirsToScan.push(SESSIONS_DIR)
 
   for (const dir of dirsToScan) {
     try {
@@ -612,6 +617,8 @@ interface ParsedHandoff {
   decisions: string[]
   userPreferences: string[]
   blockers: string[]
+  whatSurprisedMe: string[]
+  gotchas: string[]
   remainder: string | null
 }
 
@@ -624,6 +631,8 @@ const SECTION_HEADERS: Record<string, keyof ParsedHandoff> = {
   'DECISIONS:': 'decisions',
   'USER_PREFERENCES:': 'userPreferences',
   'BLOCKERS:': 'blockers',
+  'WHAT_SURPRISED_ME:': 'whatSurprisedMe',
+  'GOTCHAS:': 'gotchas',
 }
 
 /**
@@ -642,6 +651,8 @@ export function parseStructuredHandoff(text: string): ParsedHandoff {
     decisions: [],
     userPreferences: [],
     blockers: [],
+    whatSurprisedMe: [],
+    gotchas: [],
     remainder: null,
   }
 
