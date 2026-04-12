@@ -15,7 +15,7 @@ import { logActivity } from '../features/activity-log.js'
 import { saveSessionState, extractSessionStateFromTranscript, findTranscriptPathSync as findTranscriptSync } from '../features/session-state.js'
 import { readConfig } from '../config.js'
 import { loadCalibration } from '../features/calibration.js'
-import { readStdin, outputDecision, writeJsonFileAtomic, readJsonFile } from './shared.js'
+import { readStdin, outputDecision, writeJsonFileAtomic, readJsonFile, resolveProvider } from './shared.js'
 
 /**
  * PostToolUse hook handler.
@@ -59,6 +59,8 @@ export async function handlePostToolUseHook(): Promise<void> {
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
   const parts: string[] = []
   const hubPushes: Promise<void>[] = []
+  const provider = await resolveProvider()
+  const canonicalTool = provider.tools.toCanonical(input.tool_name)
 
   // Fire-and-forget hub push helper — scrubs secrets before sending
   function hubPush(cwd: string | null, fragments: Array<{ type: string; content: Record<string, unknown> }>) {
@@ -86,7 +88,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
 
 
   // 1. Compress bash output if applicable
-  if (input.tool_name === 'Bash') {
+  if (canonicalTool === 'bash_execute') {
     const toolResponse = input.tool_response || ''
     if (toolResponse.length >= 500) {
       const result = compressBashOutput(toolResponse)
@@ -203,7 +205,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   }
 
   // 2. Detect repeated edits to the same file — a sign of thrashing
-  if (input.tool_name === 'Edit' || input.tool_name === 'Write') {
+  if (canonicalTool === 'file_edit' || canonicalTool === 'file_write') {
     const filePath = (input.tool_input?.file_path as string) || ''
     if (filePath) {
       const editWarning = trackFileEdits(input.session_id, filePath)
@@ -221,7 +223,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   }
 
   // 2b. Track file reads + inject context for hot files + error cross-reference
-  if (input.tool_name === 'Read') {
+  if (canonicalTool === 'file_read') {
     const filePath = (input.tool_input?.file_path as string) || ''
     if (filePath && cwd) {
       try { recordFileRead(cwd, filePath, input.session_id) } catch {}
@@ -275,7 +277,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   }
 
   // 2c. Gotcha injection for Read/View — fire-and-forget, rate-limited per file per session
-  if (input.tool_name === 'Read' || input.tool_name === 'View') {
+  if (canonicalTool === 'file_read') {
     const filePath = (input.tool_input?.file_path as string) || ''
     if (filePath && cwd && !hasCheckedGotcha(input.session_id, filePath)) {
       markGotchaChecked(input.session_id, filePath)
@@ -526,10 +528,11 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
 }
 
 /**
- * Find the transcript path for a session by scanning the projects directory.
+ * Find the transcript path for a session by scanning the provider's sessions directory.
  */
 async function findTranscriptPath(sessionId: string): Promise<string | null> {
-  const projectsDir = resolve(homedir(), '.claude/projects')
+  const provider = await resolveProvider()
+  const projectsDir = provider.directories.sessionsDir()
   try {
     const { readdir } = await import('node:fs/promises')
     const projectDirs = await readdir(projectsDir, { withFileTypes: true })

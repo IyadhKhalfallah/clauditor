@@ -6,7 +6,7 @@ import { parseJsonlFile, extractTurns, extractModel } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
 import { hasResumeBoundary, detectResumeAnomaly } from '../features/resume-detector.js'
 import { logActivity } from '../features/activity-log.js'
-import { readStdin, outputDecision, pruneStaleStateFiles } from './shared.js'
+import { readStdin, outputDecision, pruneStaleStateFiles, resolveProvider } from './shared.js'
 
 /**
  * SessionStart hook handler.
@@ -44,7 +44,8 @@ async function buildSessionStartContext(
 
   try {
     // Find recent sessions for this project
-    const projectsDir = resolve(homedir(), '.claude/projects')
+    const provider = await resolveProvider()
+    const projectsDir = provider.directories.sessionsDir()
     const recentIssues = await checkRecentSessions(projectsDir)
 
     if (recentIssues.length > 0) {

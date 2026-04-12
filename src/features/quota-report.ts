@@ -39,8 +39,8 @@ export interface QuotaBrief {
  * Analyze all sessions across all projects for the last N days.
  * Deduplicates continued sessions by message ID.
  */
-export function computeQuotaBrief(days: number = 7): QuotaBrief {
-  const projectsDir = resolve(homedir(), '.claude/projects')
+export function computeQuotaBrief(days: number = 7, sessionsDir?: string): QuotaBrief {
+  const projectsDir = sessionsDir ?? resolve(homedir(), '.claude/projects')
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   const sessions: SessionReport[] = []
   const seenMessageIds = new Set<string>()
@@ -148,8 +148,8 @@ export interface TimeAnalysis {
  * Analyze token costs by hour of day across all sessions.
  * This can reveal peak-hour pricing multipliers.
  */
-export function computeTimeAnalysis(days: number = 7): TimeAnalysis {
-  const projectsDir = resolve(homedir(), '.claude/projects')
+export function computeTimeAnalysis(days: number = 7, sessionsDir?: string): TimeAnalysis {
+  const projectsDir = sessionsDir ?? resolve(homedir(), '.claude/projects')
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   const seenMessageIds = new Set<string>()
 

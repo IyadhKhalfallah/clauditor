@@ -69,8 +69,8 @@ export function loadCalibration(): CalibrationData {
  * Every number comes from the user's own data. Nothing hardcoded
  * except the rotation cost estimate (5 turns of warmup).
  */
-export function calibrate(): CalibrationData {
-  const projectsDir = resolve(homedir(), '.claude/projects')
+export function calibrate(sessionsDir?: string): CalibrationData {
+  const projectsDir = sessionsDir ?? resolve(homedir(), '.claude/projects')
   const profiles: SessionProfile[] = []
 
   try {
