@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.29.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.28.0...v1.29.0) (2026-04-12)
+
+
+### Features
+
+* project picker in login flow + credential leak fix ([#119](https://github.com/IyadhKhalfallah/clauditor/issues/119)) ([4ad1c48](https://github.com/IyadhKhalfallah/clauditor/commit/4ad1c48270832ca22f281e2ff119c6289a21de44))
+
+
+### Bug Fixes
+
+* download tarball to file instead of bash variable ([#116](https://github.com/IyadhKhalfallah/clauditor/issues/116)) ([186925e](https://github.com/IyadhKhalfallah/clauditor/commit/186925eeb2bf59d830272e314ef15ee06d37a9e2))
+
 ## [1.28.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.27.1...v1.28.0) (2026-04-11)
 
 
