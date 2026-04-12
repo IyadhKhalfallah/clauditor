@@ -214,33 +214,14 @@ export interface HookDecision {
 }
 
 // Model pricing table
+// NOTE: Canonical pricing now lives in src/providers/claude/pricing.ts.
+// This re-export preserves backward compatibility for existing imports.
 
-export const MODEL_PRICING: Record<string, PricingConfig> = {
-  'claude-sonnet-4-6': {
-    model: 'claude-sonnet-4-6',
-    inputPerMillion: 3.0,
-    outputPerMillion: 15.0,
-    cacheCreationPerMillion: 3.75,
-    cacheReadPerMillion: 0.3,
-  },
-  'claude-opus-4-6': {
-    model: 'claude-opus-4-6',
-    inputPerMillion: 15.0,
-    outputPerMillion: 75.0,
-    cacheCreationPerMillion: 18.75,
-    cacheReadPerMillion: 1.5,
-  },
-  'claude-haiku-4-5': {
-    model: 'claude-haiku-4-5',
-    inputPerMillion: 0.8,
-    outputPerMillion: 4.0,
-    cacheCreationPerMillion: 1.0,
-    cacheReadPerMillion: 0.08,
-  },
-}
+import { CLAUDE_MODELS } from './providers/claude/pricing.js'
+export { CLAUDE_MODELS as MODEL_PRICING } from './providers/claude/pricing.js'
 
 export const DEFAULT_CONFIG: ClauditorConfig = {
-  pricing: MODEL_PRICING['claude-sonnet-4-6'],
+  pricing: CLAUDE_MODELS['claude-sonnet-4-6'],
   alerts: {
     cacheBugThreshold: 3,
     loopDetectionThreshold: 3,
