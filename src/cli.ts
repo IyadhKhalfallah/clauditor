@@ -199,8 +199,9 @@ program
 
     const remoteUrl = getGitRemoteUrl()
     if (!remoteUrl) {
-      console.error('\n  ✗ Not a git repo with a remote origin.')
-      console.error('    Run this from inside a git repo with a remote configured.')
+      console.error('\n  ✗ Hub features require a git repo with a remote.')
+      console.error('    cd into your project directory, then run `clauditor login`.')
+      console.error('    If you just want hooks without hub sync, run `clauditor install`.')
       process.exit(1)
     }
 
