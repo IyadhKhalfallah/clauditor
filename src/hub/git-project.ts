@@ -39,9 +39,10 @@ export function normalizeGitUrl(url: string): string {
     normalized = `${sshMatch[1]}/${sshMatch[2]}`
   } else {
     // HTTPS/SSH protocol: https://host/user/repo or ssh://git@host/user/repo
+    // CRITICAL: strip credentials — URLs may contain tokens like x-access-token:PAT@host
     normalized = normalized
       .replace(/^(https?|ssh|git):\/\//, '')
-      .replace(/^[\w-]+@/, '') // strip user@ prefix
+      .replace(/^[^@]*@/, '') // strip everything before @ (credentials, tokens)
   }
 
   // Strip trailing .git
