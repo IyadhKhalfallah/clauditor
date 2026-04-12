@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.29.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.29.0...v1.29.1) (2026-04-12)
+
+
+### Bug Fixes
+
+* clearer error when clauditor login runs outside a git repo ([#120](https://github.com/IyadhKhalfallah/clauditor/issues/120)) ([85352b1](https://github.com/IyadhKhalfallah/clauditor/commit/85352b1087e7f27cfe50eeb50e7eff1f4e19c4ce))
+
 ## [1.29.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.28.0...v1.29.0) (2026-04-12)
 
 
