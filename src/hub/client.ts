@@ -6,6 +6,9 @@ import { getGitRemoteUrl, getProjectHash } from './git-project.js'
 /**
  * Resolve hub config for the current working directory.
  * Returns null if not a git repo or no team configured for this project.
+ *
+ * Uses the stored project hash from login when available,
+ * falls back to git URL hashing for backward compatibility.
  */
 export function resolveHubContext(cwd?: string): {
   projectHash: string
@@ -18,7 +21,7 @@ export function resolveHubContext(cwd?: string): {
   const config = getProjectHubConfig(remoteUrl)
   if (!config) return null
 
-  const projectHash = getProjectHash(cwd)
+  const projectHash = config.projectHash || getProjectHash(cwd)
   if (!projectHash) return null
 
   return { projectHash, remoteUrl, config }

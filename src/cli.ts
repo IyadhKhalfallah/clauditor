@@ -277,49 +277,49 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
   try {
     const result = await waitForResult()
 
+    console.log(`\n  ✓ Logged in to team "${result.teamName}" (${result.plan})`)
+
+    // Fetch projects and let user pick one
+    const selectedProject = await pickProject(hubUrl, result.apiKey)
+
     setProjectHubConfig(remoteUrl, {
       apiKey: result.apiKey,
       url: hubUrl,
       developerHash,
       teamName: result.teamName,
+      projectId: selectedProject.id,
+      projectName: selectedProject.name,
+      projectHash: selectedProject.hash,
     })
 
-    console.log(`\n  ✓ Logged in to team "${result.teamName}" (${result.plan})`)
-    console.log(`  Connected: ${remoteUrl} → ${result.teamName}`)
+    console.log(`  Connected to project: ${selectedProject.name}`)
 
-    // Sync local auto-memory + show team brief summary
-    const projectHash = getProjectHash()
-
-    if (projectHash) {
-      // Sync local auto-memory to hub (silent)
-      try {
-        const { readAutoMemory, syncMemoryToHub } = await import('./hub/memory-sync.js')
-        const memories = readAutoMemory(process.cwd())
-        if (memories.length > 0) {
-          const syncResult = await syncMemoryToHub(memories, projectHash, developerHash, { apiKey: result.apiKey, url: hubUrl }, remoteUrl)
-          if (syncResult.synced > 0) {
-            console.log(`  ↑ Synced ${syncResult.synced} local memories to team hub`)
-          }
+    // Sync local auto-memory to the selected project
+    try {
+      const { readAutoMemory, syncMemoryToHub } = await import('./hub/memory-sync.js')
+      const memories = readAutoMemory(process.cwd())
+      if (memories.length > 0) {
+        const syncResult = await syncMemoryToHub(memories, selectedProject.hash, developerHash, { apiKey: result.apiKey, url: hubUrl })
+        if (syncResult.synced > 0) {
+          console.log(`  ↑ Synced ${syncResult.synced} local memories`)
         }
-      } catch {}
+      }
+    } catch {}
 
-      // Show brief count (not full entries — could be many)
-      try {
-        const briefRes = await fetch(`${hubUrl}/api/v1/knowledge/brief?project_hash=${projectHash}&max=1`, {
-          headers: { 'X-Clauditor-Key': result.apiKey },
-          signal: AbortSignal.timeout(5000),
-        })
-        if (briefRes.ok) {
-          const briefData = await briefRes.json() as { brief: Array<{ title: string }>; sources?: Record<string, number> }
-          const total = Object.values(briefData.sources || {}).reduce((a, b) => a + b, 0)
-          if (total > 0) {
-            console.log(`  ↓ ${total} team knowledge entries available — will be injected into your sessions`)
-          } else {
-            console.log(`  No team knowledge yet — it will accumulate as you work`)
-          }
+    // Show brief count
+    try {
+      const briefRes = await fetch(`${hubUrl}/api/v1/knowledge/brief?project_hash=${selectedProject.hash}&max=1`, {
+        headers: { 'X-Clauditor-Key': result.apiKey },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (briefRes.ok) {
+        const briefData = await briefRes.json() as { brief: Array<{ title: string }>; sources?: Record<string, number> }
+        const total = Object.values(briefData.sources || {}).reduce((a, b) => a + b, 0)
+        if (total > 0) {
+          console.log(`  ↓ ${total} team knowledge entries available`)
         }
-      } catch {}
-    }
+      }
+    } catch {}
 
     console.log('')
 
@@ -394,6 +394,53 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
     console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
     process.exit(1)
   }
+}
+
+/**
+ * Fetch projects from the hub and let the user pick one.
+ * Only admins can create projects (via dashboard). Developers pick from existing.
+ */
+async function pickProject(
+  hubUrl: string,
+  apiKey: string,
+): Promise<{ id: string; name: string; hash: string }> {
+  const readline = await import('node:readline')
+
+  const res = await fetch(`${hubUrl}/api/v1/projects/list`, {
+    headers: { 'X-Clauditor-Key': apiKey },
+    signal: AbortSignal.timeout(10000),
+  })
+
+  if (!res.ok) throw new Error('Failed to fetch projects from hub')
+
+  const data = await res.json() as {
+    projects: Array<{ id: string; name: string; project_hash: string }>
+  }
+
+  if (data.projects.length === 0) {
+    throw new Error('No projects found. Ask your team admin to create one in the dashboard.')
+  }
+
+  console.log(`\n  Select a project to sync knowledge to:\n`)
+  for (let i = 0; i < data.projects.length; i++) {
+    console.log(`    ${i + 1}. ${data.projects[i].name}`)
+  }
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  const answer = await new Promise<string>((resolve) => {
+    rl.question(`\n  Choice (1-${data.projects.length}): `, (ans) => {
+      rl.close()
+      resolve(ans.trim())
+    })
+  })
+
+  const choice = parseInt(answer, 10)
+  if (choice < 1 || choice > data.projects.length) {
+    throw new Error('Invalid choice')
+  }
+
+  const p = data.projects[choice - 1]
+  return { id: p.id, name: p.name, hash: p.project_hash }
 }
 
 async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash: string) {

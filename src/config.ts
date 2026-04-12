@@ -10,6 +10,9 @@ export interface ProjectHubConfig {
   url: string
   developerHash: string
   teamName?: string
+  projectId?: string     // Hub project UUID — set during login project picker
+  projectName?: string   // Friendly project name
+  projectHash?: string   // Hub project hash — used in API calls
 }
 
 export interface ClauditorUserConfig {
