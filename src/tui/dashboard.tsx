@@ -3,6 +3,7 @@ import { Box, Text } from 'ink'
 import type { SessionState } from '../types.js'
 import { estimateCost, getPricingForModel } from '../features/cost-tracker.js'
 import { loadCalibration } from '../features/calibration.js'
+import { t } from '../i18n.js'
 
 interface DashboardProps {
   session: SessionState
@@ -53,27 +54,27 @@ export function Dashboard({ session }: DashboardProps) {
         <Text>
           <Text bold>{session.label}</Text>
           {'  '}
-          <Text dimColor>{modelShort} · {session.turns.length} turns</Text>
+          <Text dimColor>{t('dashboard.modelTurns', { model: modelShort, turns: session.turns.length })}</Text>
         </Text>
       </Box>
 
       {/* Waste factor — the one number that matters */}
       <Box flexDirection="column" marginBottom={1}>
         <Text>
-          <Text bold>Waste factor: {wasteFactor}x</Text>
+          <Text bold>{t('dashboard.wasteLabel', { waste: wasteFactor })}</Text>
           {'  '}
           {willBlock ? (
-            <Text color="red" bold>BLOCKED — start a fresh session</Text>
+            <Text color="red" bold>{t('dashboard.blocked')}</Text>
           ) : wasteFactor >= 7 ? (
-            <Text color="yellow">approaching rotation</Text>
+            <Text color="yellow">{t('dashboard.approaching')}</Text>
           ) : (
-            <Text color="green">efficient</Text>
+            <Text color="green">{t('dashboard.efficient')}</Text>
           )}
         </Text>
         <Text color={barColor}>{wasteBar}</Text>
         <Text dimColor>
-          Started at {(baseline / 1000).toFixed(0)}k/turn → now {(current / 1000).toFixed(0)}k/turn
-          {wasteFactor > 1 ? ` (${wasteFactor}x more quota per turn)` : ''}
+          {t('dashboard.trend', { base: (baseline / 1000).toFixed(0), now: (current / 1000).toFixed(0) })}
+          {wasteFactor > 1 ? t('dashboard.trendMore', { waste: wasteFactor }) : ''}
         </Text>
       </Box>
 
@@ -90,14 +91,14 @@ export function Dashboard({ session }: DashboardProps) {
       {!cacheOk && session.turns.length >= 10 && (
         <Box marginTop={1}>
           <Text color="red" bold>
-            ● Cache broken — {(cacheRatio * 100).toFixed(0)}% hit rate (should be &gt;70%)
+            {t('dashboard.cacheBroken', { pct: (cacheRatio * 100).toFixed(0) })}
           </Text>
         </Box>
       )}
       {session.loopState.loopDetected && (
         <Box>
           <Text color="red" bold>
-            ● Loop — {session.loopState.loopPattern} repeated {session.loopState.consecutiveIdenticalTurns}x
+            {t('dashboard.loop', { pattern: session.loopState.loopPattern ?? '', count: session.loopState.consecutiveIdenticalTurns })}
           </Text>
         </Box>
       )}
@@ -106,9 +107,12 @@ export function Dashboard({ session }: DashboardProps) {
       {session.turns.length < 10 && (
         <Box marginTop={1}>
           <Text dimColor>
-            clauditor tracks tokens/turn as your session grows.{'\n'}
-            At {cal.wasteThreshold}x waste ({cal.minTurns}+ turns), it saves context and blocks.{' '}
-            {cal.confident ? '(auto-calibrated from your history)' : '(will auto-calibrate after more sessions)'}
+            {t('dashboard.howItWorks')}{'\n'}
+            {t('dashboard.howItWorksThreshold', {
+              threshold: cal.wasteThreshold,
+              minTurns: cal.minTurns,
+              calStatus: cal.confident ? t('dashboard.calibrated') : t('dashboard.calibrating'),
+            })}
           </Text>
         </Box>
       )}

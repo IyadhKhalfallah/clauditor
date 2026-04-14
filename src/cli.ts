@@ -7,6 +7,11 @@ import { homedir } from 'node:os'
 import { cosmiconfig } from 'cosmiconfig'
 import { DEFAULT_CONFIG } from './types.js'
 import type { ClauditorConfig } from './types.js'
+import { readConfig } from './config.js'
+import { initLocaleFromEnv, t } from './i18n.js'
+
+// Activate locale before any command description or action runs
+initLocaleFromEnv(readConfig().locale)
 
 // Read version from package.json so it stays in sync with releases
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -16,16 +21,16 @@ const program = new Command()
 
 program
   .name('clauditor')
-  .description('Real-time session health monitoring for Claude Code')
+  .description(t('cli.description'))
   .version(pkg.version)
 
 // ─── clauditor watch ──────────────────────────────────────────────
 
 program
   .command('watch')
-  .description('Live TUI dashboard for active sessions')
-  .option('-p, --project <path>', 'Watch a specific project directory')
-  .option('-a, --all', 'Watch all projects')
+  .description(t('cli.cmd.watch.desc'))
+  .option('-p, --project <path>', t('cli.cmd.watch.opt.project'))
+  .option('-a, --all', t('cli.cmd.watch.opt.all'))
   .action(async (options) => {
     const config = await loadConfig()
     const { startDaemon } = await import('./daemon/index.js')
@@ -60,9 +65,9 @@ program
 
 program
   .command('status')
-  .description('Quick health check of your most recent session (no TUI)')
-  .option('-p, --project <path>', 'Check a specific project')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.status.desc'))
+  .option('-p, --project <path>', t('cli.cmd.status.opt.project'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const config = await loadConfig()
     const { SessionStore } = await import('./daemon/store.js')
@@ -83,7 +88,7 @@ program
       if (options.json) {
         console.log(JSON.stringify({ status: 'no_sessions' }))
       } else {
-        console.log('No active sessions found.')
+        console.log(t('status.noSessions'))
       }
       return
     }
@@ -125,30 +130,30 @@ program
 
     console.log(`\n  ${s.label}`)
     console.log(`  ${s.model?.replace('claude-', '').split('-2')[0] || 'unknown'} · ${s.turns.length} turns\n`)
-    console.log(`  Cache:    ${cacheColor}${(s.cacheHealth.lastCacheRatio * 100).toFixed(0)}% ${s.cacheHealth.status}${reset}`)
-    console.log(`  Context:  ${ctxColor}${contextPct}%${reset} (${(contextSize / 1000).toFixed(0)}k / ${(contextLimit / 1000).toFixed(0)}k)`)
+    console.log(`${cacheColor}${t('status.cacheLine', { ratio: (s.cacheHealth.lastCacheRatio * 100).toFixed(0), status: s.cacheHealth.status })}${reset}`)
+    console.log(`${ctxColor}${t('status.contextLine', { pct: contextPct, cur: (contextSize / 1000).toFixed(0), max: (contextLimit / 1000).toFixed(0) })}${reset}`)
 
     if (s.loopState.loopDetected) {
-      console.log(`  Loop:     \x1b[31m${s.loopState.loopPattern} (${s.loopState.consecutiveIdenticalTurns}x)\x1b[0m`)
+      console.log(`\x1b[31m${t('status.loopLine', { pattern: s.loopState.loopPattern ?? '', count: s.loopState.consecutiveIdenticalTurns })}\x1b[0m`)
     }
 
-    console.log(`  Cost:     ~$${cost.totalCost.toFixed(2)} (saved ~$${cost.savedVsUncached.toFixed(2)} by cache)`)
+    console.log(t('status.costLine', { cost: cost.totalCost.toFixed(2), saved: cost.savedVsUncached.toFixed(2) }))
 
     // Show issues
     if (s.cacheHealth.degradationDetected) {
-      console.log(`\n  \x1b[31m● Session is slow — cache is broken\x1b[0m`)
-      console.log(`    → Run /clear in Claude Code, then re-state what you're working on.`)
+      console.log(`\n  \x1b[31m${t('status.slowCache')}\x1b[0m`)
+      console.log(`    ${t('status.slowCacheFix')}`)
     }
     if (contextPct >= 95) {
-      console.log(`\n  \x1b[31m● Context full — Claude is about to forget things\x1b[0m`)
-      console.log(`    → Start a fresh session. Save important context to CLAUDE.md first.`)
+      console.log(`\n  \x1b[31m${t('status.contextFull')}\x1b[0m`)
+      console.log(`    ${t('status.contextFullFix')}`)
     } else if (contextPct >= 80) {
-      console.log(`\n  \x1b[33m● Context filling up — ${contextPct}% used\x1b[0m`)
-      console.log(`    → Good time to wrap up and start a new session.`)
+      console.log(`\n  \x1b[33m${t('status.contextFilling', { pct: contextPct })}\x1b[0m`)
+      console.log(`    ${t('status.contextFillingFix')}`)
     }
 
     if (!s.cacheHealth.degradationDetected && contextPct < 80 && !s.loopState.loopDetected) {
-      console.log(`\n  \x1b[32m✓ All clear — session is healthy.\x1b[0m`)
+      console.log(`\n  \x1b[32m${t('status.allClear')}\x1b[0m`)
     }
 
     console.log('')
@@ -158,8 +163,8 @@ program
 
 program
   .command('install')
-  .description('Register clauditor hooks in ~/.claude/settings.json')
-  .option('--claude-dir <path>', 'Path to Claude config directory (default: ~/.claude)')
+  .description(t('cli.cmd.install.desc'))
+  .option('--claude-dir <path>', t('cli.cmd.install.opt.claudeDir'))
   .action(async (opts: { claudeDir?: string }) => {
     const { installHooks } = await import('./install.js')
     const messages = await installHooks(opts.claudeDir)
@@ -172,8 +177,8 @@ program
 
 program
   .command('uninstall')
-  .description('Remove clauditor hooks from ~/.claude/settings.json')
-  .option('--claude-dir <path>', 'Path to Claude config directory (default: ~/.claude)')
+  .description(t('cli.cmd.uninstall.desc'))
+  .option('--claude-dir <path>', t('cli.cmd.install.opt.claudeDir'))
   .action(async (opts: { claudeDir?: string }) => {
     const { uninstallHooks } = await import('./install.js')
     const messages = await uninstallHooks(opts.claudeDir)
@@ -188,9 +193,9 @@ const DEFAULT_HUB_URL = 'https://www.clauditor.ai'
 
 program
   .command('login')
-  .description('Sign in to clauditor hub')
-  .option('--hub-url <url>', 'Hub URL', DEFAULT_HUB_URL)
-  .option('--device', 'Use device code flow instead of opening browser')
+  .description(t('cli.cmd.login.desc'))
+  .option('--hub-url <url>', t('cli.cmd.login.opt.hubUrl'), DEFAULT_HUB_URL)
+  .option('--device', t('cli.cmd.login.opt.device'))
   .action(async (options) => {
     const { createHash } = await import('node:crypto')
     const { hostname, userInfo } = await import('node:os')
@@ -199,9 +204,9 @@ program
 
     const remoteUrl = getGitRemoteUrl()
     if (!remoteUrl) {
-      console.error('\n  ✗ Hub features require a git repo with a remote.')
-      console.error('    cd into your project directory, then run `clauditor login`.')
-      console.error('    If you just want hooks without hub sync, run `clauditor install`.')
+      console.error(t('login.errNoRepo'))
+      console.error(t('login.errNoRepoHint1'))
+      console.error(t('login.errNoRepoHint2'))
       process.exit(1)
     }
 
@@ -224,13 +229,13 @@ program
         const settings = JSON.parse((await import('node:fs')).readFileSync(settingsPath, 'utf-8'))
         const hasHooks = settings.hooks && Object.keys(settings.hooks).length > 0
         if (!hasHooks) {
-          console.log('\n  Setting up clauditor hooks...')
+          console.log(t('login.settingUpHooks'))
           const { installHooks } = await import('./install.js')
           const msgs = await installHooks()
           msgs.forEach((m: string) => console.log(m))
         }
       } else {
-        console.log('\n  Setting up clauditor hooks...')
+        console.log(t('login.settingUpHooks'))
         const { installHooks } = await import('./install.js')
         const msgs = await installHooks()
         msgs.forEach((m: string) => console.log(m))
@@ -262,8 +267,8 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
   const { port, waitForResult } = await startAuthServer(state)
   const authUrl = `${hubUrl}/cli-auth?state=${state}&port=${port}&project=${encodeURIComponent(remoteUrl)}&developer_hash=${developerHash}`
 
-  console.log('\n  Opening browser to sign in...')
-  console.log(`\n  If the browser didn't open, visit:`)
+  console.log(t('login.openingBrowser'))
+  console.log(t('login.browserFallbackHint'))
   console.log(`  ${authUrl}\n`)
 
   try {
@@ -273,12 +278,12 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
     // Browser open failed — user will use the printed URL
   }
 
-  console.log('  Waiting for authentication...')
+  console.log(t('login.waitingAuth'))
 
   try {
     const result = await waitForResult()
 
-    console.log(`\n  ✓ Logged in to team "${result.teamName}" (${result.plan})`)
+    console.log(t('login.loggedInTeam', { team: result.teamName, plan: result.plan }))
 
     // Fetch projects and let user pick one
     const selectedProject = await pickProject(hubUrl, result.apiKey)
@@ -293,7 +298,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
       projectHash: selectedProject.hash,
     })
 
-    console.log(`  Connected to project: ${selectedProject.name}`)
+    console.log(t('login.connectedProject', { project: selectedProject.name }))
 
     // Sync local auto-memory to the selected project
     try {
@@ -302,7 +307,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
       if (memories.length > 0) {
         const syncResult = await syncMemoryToHub(memories, selectedProject.hash, developerHash, { apiKey: result.apiKey, url: hubUrl })
         if (syncResult.synced > 0) {
-          console.log(`  ↑ Synced ${syncResult.synced} local memories`)
+          console.log(t('login.memoriesSynced', { count: syncResult.synced }))
         }
       }
     } catch {}
@@ -317,7 +322,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
         const briefData = await briefRes.json() as { brief: Array<{ title: string }>; sources?: Record<string, number> }
         const total = Object.values(briefData.sources || {}).reduce((a, b) => a + b, 0)
         if (total > 0) {
-          console.log(`  ↓ ${total} team knowledge entries available`)
+          console.log(t('login.knowledgeAvailable', { count: total }))
         }
       }
     } catch {}
@@ -338,7 +343,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
     } catch {}
 
     if (mcpAlreadyConfigured) {
-      console.log(`  ✓ MCP already configured`)
+      console.log(t('login.mcpAlreadyConfigured'))
     } else {
       // Verify MCP server is reachable
       let mcpAvailable = false
@@ -353,7 +358,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
         const readline = await import('node:readline')
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
         const answer = await new Promise<string>((resolve) => {
-          rl.question('  Set up MCP so Claude can query team knowledge mid-session? (Y/n) ', (ans) => {
+          rl.question(t('login.mcpPrompt'), (ans) => {
             rl.close()
             resolve(ans.trim().toLowerCase())
           })
@@ -364,7 +369,7 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
             const { execSync } = await import('node:child_process')
             try { execSync('claude mcp remove clauditor 2>/dev/null', { stdio: 'ignore' }) } catch {}
             execSync(`claude mcp add --transport http -s user clauditor "${mcpUrl}"`, { stdio: 'inherit' })
-            console.log(`  ✓ MCP configured — start a new Claude Code session to use it`)
+            console.log(t('login.mcpConfigured'))
           } catch {
             try {
               const { readFileSync, writeFileSync } = await import('node:fs')
@@ -379,20 +384,20 @@ async function loginBrowserFlow(hubUrl: string, remoteUrl: string, developerHash
               mcpServers.clauditor = { type: 'http', url: mcpUrl }
               settings.mcpServers = mcpServers
               writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
-              console.log(`  ✓ MCP configured via settings.json — start a new Claude Code session to use it`)
+              console.log(t('login.mcpConfiguredSettings'))
             } catch {
-              console.log(`\n  To set up MCP manually, run:`)
+              console.log(t('login.mcpManual'))
               console.log(`  claude mcp add --transport http -s user clauditor "${mcpUrl}"`)
             }
           }
         } else {
-          console.log(`\n  You can set up MCP later with:`)
+          console.log(t('login.mcpLater'))
           console.log(`  claude mcp add --transport http -s user clauditor "${mcpUrl}"`)
         }
       }
     }
   } catch (err) {
-    console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
+    console.error(t('login.errGeneric', { error: err instanceof Error ? err.message : String(err) }))
     process.exit(1)
   }
 }
@@ -412,24 +417,24 @@ async function pickProject(
     signal: AbortSignal.timeout(10000),
   })
 
-  if (!res.ok) throw new Error('Failed to fetch projects from hub')
+  if (!res.ok) throw new Error(t('pickProject.errFetch'))
 
   const data = await res.json() as {
     projects: Array<{ id: string; name: string; project_hash: string }>
   }
 
   if (data.projects.length === 0) {
-    throw new Error('No projects found. Ask your team admin to create one in the dashboard.')
+    throw new Error(t('pickProject.errNoProjects'))
   }
 
-  console.log(`\n  Select a project to sync knowledge to:\n`)
+  console.log(t('pickProject.prompt'))
   for (let i = 0; i < data.projects.length; i++) {
     console.log(`    ${i + 1}. ${data.projects[i].name}`)
   }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   const answer = await new Promise<string>((resolve) => {
-    rl.question(`\n  Choice (1-${data.projects.length}): `, (ans) => {
+    rl.question(t('pickProject.choicePrompt', { max: data.projects.length }), (ans) => {
       rl.close()
       resolve(ans.trim())
     })
@@ -437,7 +442,7 @@ async function pickProject(
 
   const choice = parseInt(answer, 10)
   if (choice < 1 || choice > data.projects.length) {
-    throw new Error('Invalid choice')
+    throw new Error(t('pickProject.errInvalid'))
   }
 
   const p = data.projects[choice - 1]
@@ -449,15 +454,15 @@ async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash:
   const { setProjectHubConfig } = await import('./config.js')
   const { getProjectHash } = await import('./hub/git-project.js')
 
-  console.log('\n  Requesting device code...')
+  console.log(t('login.requestingDeviceCode'))
 
   try {
     const projectHash = getProjectHash() || undefined
     const codes = await requestDeviceCode(hubUrl, projectHash, developerHash)
 
-    console.log(`\n  Visit: ${codes.verification_url}`)
-    console.log(`  Enter code: ${codes.user_code}`)
-    console.log(`\n  Waiting for confirmation...`)
+    console.log(t('login.deviceVisit', { url: codes.verification_url }))
+    console.log(t('login.deviceCode', { code: codes.user_code }))
+    console.log(t('login.waitingConfirmation'))
 
     const result = await pollForToken(hubUrl, codes.device_code, codes.interval, codes.expires_in)
 
@@ -468,12 +473,12 @@ async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash:
       teamName: result.team_name,
     })
 
-    console.log(`\n  ✓ Logged in to team "${result.team_name}" (${result.plan})`)
-    console.log(`  Connected: ${remoteUrl} → ${result.team_name}`)
-    console.log(`\n  Knowledge will sync automatically during sessions on this project.`)
-    console.log(`  Next: run \`clauditor init\` to wire your AI tool into team knowledge.`)
+    console.log(t('login.loggedInTeam', { team: result.team_name, plan: result.plan }))
+    console.log(t('login.deviceConnected', { remote: remoteUrl, team: result.team_name }))
+    console.log(t('login.syncNote'))
+    console.log(t('login.nextInit'))
   } catch (err) {
-    console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
+    console.error(t('login.errGeneric', { error: err instanceof Error ? err.message : String(err) }))
     process.exit(1)
   }
 }
@@ -482,10 +487,10 @@ async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash:
 
 program
   .command('init')
-  .description('Add the "## Knowledge" instruction to your AI tool\'s rules file')
-  .option('--tool <tool>', 'claude_code | codex | cursor | claude_desktop | other')
-  .option('--hub-url <url>', 'Hub URL', DEFAULT_HUB_URL)
-  .option('-y, --yes', 'Skip the confirmation prompt')
+  .description(t('cli.cmd.init.desc'))
+  .option('--tool <tool>', t('cli.cmd.init.opt.tool'))
+  .option('--hub-url <url>', t('cli.cmd.login.opt.hubUrl'), DEFAULT_HUB_URL)
+  .option('-y, --yes', t('cli.cmd.init.opt.yes'))
   .action(async (options: { tool?: string; hubUrl?: string; yes?: boolean }) => {
     const { getGitRemoteUrl } = await import('./hub/git-project.js')
     const { getProjectHubConfig } = await import('./config.js')
@@ -507,7 +512,7 @@ program
     let tool: Tool | null = null
     if (options.tool) {
       if (!validTools.includes(options.tool as Tool)) {
-        console.error(`\n  ✗ Unknown tool "${options.tool}". Valid: ${validTools.join(', ')}`)
+        console.error(t('init.errUnknownTool', { tool: options.tool, valid: validTools.join(', ') }))
         process.exit(1)
       }
       tool = options.tool as Tool
@@ -515,16 +520,16 @@ program
       const detected = detectTool(cwd)
       if (detected) {
         tool = detected
-        console.log(`\n  Detected ${tool} from existing config file.`)
+        console.log(t('init.detected', { tool }))
       } else {
         const readline = await import('node:readline')
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-        console.log('\n  Which AI tool are you using?')
-        validTools.forEach((t, i) => console.log(`    ${i + 1}. ${t}`))
-        const answer = await new Promise<string>((r) => rl.question('\n  Choice (1-5): ', (a) => { rl.close(); r(a.trim()) }))
+        console.log(t('init.whichTool'))
+        validTools.forEach((name, i) => console.log(`    ${i + 1}. ${name}`))
+        const answer = await new Promise<string>((r) => rl.question(t('init.choice5'), (a) => { rl.close(); r(a.trim()) }))
         const choice = parseInt(answer, 10)
         if (!choice || choice < 1 || choice > validTools.length) {
-          console.error('\n  ✗ Invalid choice.')
+          console.error(t('init.errInvalidChoice'))
           process.exit(1)
         }
         tool = validTools[choice - 1]
@@ -534,12 +539,12 @@ program
     const target = pathForTool(tool)
 
     if (!target) {
-      console.log(`\n  ${tool === 'claude_desktop' ? 'Claude Desktop' : 'Your tool'} has no per-project config file.`)
-      console.log(`  Paste this into your custom instructions or starter prompt:\n`)
+      console.log(tool === 'claude_desktop' ? t('init.noConfigFileClaudeDesktop') : t('init.noConfigFileOther'))
+      console.log(t('init.pasteHint'))
       console.log('  ─────────────────────────────────────────────')
       console.log(INSTRUCTION_BLOCK.split('\n').map((l) => '  ' + l).join('\n'))
       console.log('  ─────────────────────────────────────────────')
-      console.log(`\n  When it's in place, click "I've added it" in the dashboard.`)
+      console.log(t('init.addedHint'))
       return
     }
 
@@ -548,10 +553,10 @@ program
       const readline = await import('node:readline')
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
       const answer = await new Promise<string>((r) =>
-        rl.question(`\n  Write the "## Knowledge" block to ${target}? (Y/n) `, (a) => { rl.close(); r(a.trim().toLowerCase()) })
+        rl.question(t('init.writePrompt', { target }), (a) => { rl.close(); r(a.trim().toLowerCase()) })
       )
       if (answer === 'n' || answer === 'no') {
-        console.log('  Aborted.')
+        console.log(t('init.aborted'))
         return
       }
     }
@@ -559,14 +564,14 @@ program
     const result = writeInstruction(cwd, tool)
     if (result.status === 'manual_required') {
       // Shouldn't reach here — pathForTool already filtered, but be safe.
-      console.log(`\n  Manual step required for ${tool}.`)
+      console.log(t('init.manualRequired', { tool }))
       return
     }
 
     if (result.status === 'already_present') {
-      console.log(`\n  ✓ ${result.path} already contains a clauditor knowledge block — left it untouched.`)
+      console.log(t('init.alreadyPresent', { path: result.path }))
     } else {
-      console.log(`\n  ✓ ${result.created ? 'Created' : 'Updated'} ${result.path}`)
+      console.log(result.created ? t('init.created', { path: result.path }) : t('init.updated', { path: result.path }))
     }
 
     // Notify hub (best-effort — older hubs lack this endpoint)
@@ -576,10 +581,10 @@ program
         const hubUrl = options.hubUrl || hubCfg.url || DEFAULT_HUB_URL
         const ok = await notifyHub(hubUrl, hubCfg.apiKey)
         if (ok) {
-          console.log(`  ✓ Dashboard step marked complete.`)
+          console.log(t('init.dashboardMarked'))
         }
       } else {
-        console.log(`  (Run \`clauditor login\` to sync this to your team's dashboard.)`)
+        console.log(t('init.loginHint'))
       }
     }
   })
@@ -588,16 +593,16 @@ program
 
 program
   .command('sync')
-  .description('Sync local knowledge to the hub (auto-memory, session handoffs, pending queue)')
+  .description(t('cli.cmd.sync.desc'))
   .action(async () => {
     const { resolveHubContext } = await import('./hub/client.js')
     const hub = resolveHubContext()
     if (!hub) {
-      console.error('\n  ✗ Not connected to a hub. Run `clauditor login` first.')
+      console.error(t('sync.errNotConnected'))
       process.exit(1)
     }
 
-    console.log(`\n  Syncing to ${hub.config.teamName || 'hub'}...`)
+    console.log(t('sync.syncingTo', { target: hub.config.teamName || 'hub' }))
 
     let totalPushed = 0
 
@@ -608,16 +613,16 @@ program
       if (memories.length > 0) {
         const result = await syncMemoryToHub(memories, hub.projectHash, hub.config.developerHash, hub.config, hub.remoteUrl)
         if (result.synced > 0) {
-          console.log(`  ↑ ${result.synced} auto-memories synced`)
+          console.log(t('sync.memoriesSynced', { count: result.synced }))
           totalPushed += result.synced
         } else {
-          console.log(`  · Auto-memories already up to date`)
+          console.log(t('sync.memoriesUpToDate'))
         }
       } else {
-        console.log(`  · No local auto-memories found`)
+        console.log(t('sync.memoriesNone'))
       }
     } catch (err) {
-      console.error(`  ✗ Auto-memory sync failed: ${err instanceof Error ? err.message : err}`)
+      console.error(t('sync.memoriesFailed', { error: err instanceof Error ? err.message : String(err) }))
     }
 
     // 2. Push session handoffs — structured learnings + summaries as team memories
@@ -709,10 +714,10 @@ program
             if (res.ok && data.synced && data.synced > 0) {
               summariesPushed++
             } else {
-              console.error(`  ✗ Summary push failed: ${data.error || `synced=${data.synced} skipped=${data.skipped}`}`)
+              console.error(t('sync.summaryPushFailed', { error: data.error || `synced=${data.synced} skipped=${data.skipped}` }))
             }
           } catch (err) {
-            console.error(`  ✗ Summary push error: ${err instanceof Error ? err.message : err}`)
+            console.error(t('sync.summaryPushError', { error: err instanceof Error ? err.message : String(err) }))
           }
         }
 
@@ -727,18 +732,18 @@ program
       }
 
       if (handoffLearnings > 0) {
-        console.log(`  ↑ ${handoffLearnings} structured learnings from handoffs`)
+        console.log(t('sync.learnings', { count: handoffLearnings }))
         totalPushed += handoffLearnings
       }
       if (summariesPushed > 0) {
-        console.log(`  ↑ ${summariesPushed} session summary/summaries synced as team memories`)
+        console.log(t('sync.summaries', { count: summariesPushed }))
         totalPushed += summariesPushed
       }
       if (handoffLearnings === 0 && summariesPushed === 0 && handoffs.length === 0) {
-        console.log(`  · No recent session handoffs found`)
+        console.log(t('sync.handoffsNone'))
       }
     } catch (err) {
-      console.error(`  ✗ Handoff sync failed: ${err instanceof Error ? err.message : err}`)
+      console.error(t('sync.handoffFailed', { error: err instanceof Error ? err.message : String(err) }))
     }
 
     // 3. Flush push queue (retries for anything that failed earlier)
@@ -746,15 +751,15 @@ program
       const { flushQueue } = await import('./hub/push-queue.js')
       const { sent } = await flushQueue()
       if (sent > 0) {
-        console.log(`  ↑ ${sent} queued item(s) flushed`)
+        console.log(t('sync.queueFlushed', { count: sent }))
         totalPushed += sent
       }
     } catch {}
 
     if (totalPushed > 0) {
-      console.log(`\n  ✓ Synced ${totalPushed} item(s) to hub`)
+      console.log(t('sync.totalSynced', { count: totalPushed }))
     } else {
-      console.log(`\n  ✓ Everything up to date`)
+      console.log(t('sync.upToDate'))
     }
   })
 
@@ -762,10 +767,10 @@ program
 
 program
   .command('stats')
-  .description('Historical usage analysis')
-  .option('-d, --days <n>', 'Number of days to analyze', '7')
-  .option('-p, --project <path>', 'Analyze a specific project')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.stats.desc'))
+  .option('-d, --days <n>', t('cli.cmd.stats.opt.days'), '7')
+  .option('-p, --project <path>', t('cli.cmd.stats.opt.project'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const config = await loadConfig()
     const { SessionStore } = await import('./daemon/store.js')
@@ -778,7 +783,7 @@ program
       projectPath: options.project ? resolve(options.project) : undefined,
     })
 
-    if (!options.json) console.log('Scanning session files...')
+    if (!options.json) console.log(t('common.scanning'))
     await watcher.scanAll()
 
     const sessions = store.getAll()
@@ -786,7 +791,7 @@ program
       if (options.json) {
         console.log(JSON.stringify({ sessions: 0 }))
       } else {
-        console.log('No session data found.')
+        console.log(t('common.noSessions'))
       }
       return
     }
@@ -870,28 +875,28 @@ program
       return
     }
 
-    console.log(`\nStats for last ${daysAgo} days:`)
+    console.log(t('stats.header', { days: daysAgo }))
     console.log('─'.repeat(50))
-    console.log(`  Sessions:      ${recentSessions.length}`)
-    console.log(`  Total tokens:  ${totalTokens.toLocaleString()}`)
-    console.log(`  Input:         ${totalUsage.input_tokens.toLocaleString()}`)
-    console.log(`  Output:        ${totalUsage.output_tokens.toLocaleString()}`)
-    console.log(`  Cache reads:   ${totalUsage.cache_read_input_tokens.toLocaleString()}`)
-    console.log(`  Cache writes:  ${totalUsage.cache_creation_input_tokens.toLocaleString()}`)
+    console.log(t('stats.sessions', { count: recentSessions.length }))
+    console.log(t('stats.totalTokens', { count: totalTokens.toLocaleString() }))
+    console.log(t('stats.input', { count: totalUsage.input_tokens.toLocaleString() }))
+    console.log(t('stats.output', { count: totalUsage.output_tokens.toLocaleString() }))
+    console.log(t('stats.cacheReads', { count: totalUsage.cache_read_input_tokens.toLocaleString() }))
+    console.log(t('stats.cacheWrites', { count: totalUsage.cache_creation_input_tokens.toLocaleString() }))
 
-    console.log(`\n  Est. cost:     ~$${cost.totalCost.toFixed(2)}`)
-    console.log(`  Saved by cache: ~$${cost.savedVsUncached.toFixed(2)}`)
-    console.log(`  Cache efficiency: ${(cacheRatio * 100).toFixed(1)}%`)
+    console.log(t('stats.estCost', { cost: cost.totalCost.toFixed(2) }))
+    console.log(t('stats.savedByCache', { cost: cost.savedVsUncached.toFixed(2) }))
+    console.log(t('stats.cacheEfficiency', { pct: (cacheRatio * 100).toFixed(1) }))
 
     if (toolCounts.size > 0) {
-      console.log('\n  Tool calls:')
+      console.log(t('stats.toolCalls'))
       const sorted = [...toolCounts.entries()].sort((a, b) => b[1] - a[1])
       for (const [name, count] of sorted.slice(0, 10)) {
         console.log(`    ${name.padEnd(20)} ${count}`)
       }
     }
 
-    console.log('\n  Most expensive sessions:')
+    console.log(t('stats.topSessions'))
     for (const s of topSessions) {
       console.log(
         `    ${s.label.slice(0, 25).padEnd(25)}  ~$${s.cost.toFixed(2).padStart(8)}  ${String(s.turns).padStart(4)} turns  ${s.model.padEnd(10)}  cache: ${s.cacheStatus}`
@@ -903,8 +908,8 @@ program
 
 program
   .command('check-memory')
-  .description('Audit CLAUDE.md token footprint')
-  .option('-p, --project <path>', 'Project to audit', '.')
+  .description(t('cli.cmd.checkMemory.desc'))
+  .option('-p, --project <path>', t('cli.cmd.checkMemory.opt.project'), '.')
   .action(async (options) => {
     const config = await loadConfig()
     const { auditMemoryFiles, formatAuditResult } = await import(
@@ -923,9 +928,9 @@ program
 
 program
   .command('doctor')
-  .description('Check for cache degradation in recent sessions')
-  .option('-p, --project <path>', 'Check a specific project')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.doctor.desc'))
+  .option('-p, --project <path>', t('cli.cmd.doctor.opt.project'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const config = await loadConfig()
     const { SessionStore } = await import('./daemon/store.js')
@@ -938,7 +943,7 @@ program
       projectPath: options.project ? resolve(options.project) : undefined,
     })
 
-    if (!options.json) console.log('Scanning session files...')
+    if (!options.json) console.log(t('common.scanning'))
     await watcher.scanAll()
 
     const sessions = store.getAll()
@@ -946,7 +951,7 @@ program
       if (options.json) {
         console.log(JSON.stringify({ sessions: 0, issues: [] }))
       } else {
-        console.log('No session data found.')
+        console.log(t('common.noSessions'))
       }
       return
     }
@@ -985,25 +990,25 @@ program
     }
 
     if (issues.length === 0) {
-      console.log(`\n✓ No cache issues detected across ${sessions.length} sessions.`)
+      console.log(t('doctor.noIssues', { count: sessions.length }))
       return
     }
 
-    console.log(`\nFound ${issues.length} session(s) with cache issues:\n`)
+    console.log(t('doctor.foundIssues', { count: issues.length }))
 
     for (const issue of issues) {
       const icon = issue.severity === 'broken' ? '✗' : '⚠'
       const severityLabel = issue.severity === 'broken'
-        ? 'CACHE BROKEN — responses are slow'
-        : 'Cache degraded — efficiency is low'
+        ? t('doctor.brokenLabel')
+        : t('doctor.degradedLabel')
 
       console.log(`  ${icon} ${issue.label}`)
       console.log(`    ${severityLabel}`)
-      console.log(`    ${issue.turns} turns · cache ratio: ${(issue.cacheRatio * 100).toFixed(0)}%`)
-      console.log(`    Trend: ${issue.trend.map((r) => `${(r * 100).toFixed(0)}%`).join(' → ')}`)
+      console.log(t('doctor.turnsRatio', { turns: issue.turns, pct: (issue.cacheRatio * 100).toFixed(0) }))
+      console.log(t('doctor.trendLabel', { trend: issue.trend.map((r) => `${(r * 100).toFixed(0)}%`).join(' → ') }))
 
       if (issue.severity === 'broken') {
-        console.log(`    → Run /clear in that session, or start a fresh one.`)
+        console.log(t('doctor.brokenFix'))
       }
       console.log('')
     }
@@ -1013,8 +1018,8 @@ program
 
 program
   .command('impact')
-  .description('Show lifetime stats — what clauditor has caught for you')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.impact.desc'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const config = await loadConfig()
     const { SessionStore } = await import('./daemon/store.js')
@@ -1032,7 +1037,7 @@ program
       projectsDir: config.watch.projectsDir,
     })
 
-    if (!options.json) console.log('Scanning session files...')
+    if (!options.json) console.log(t('common.scanning'))
     await watcher.scanAll()
 
     const sessions = store.getAll()
@@ -1054,9 +1059,9 @@ program
 
 program
   .command('activity')
-  .description('Show recent clauditor actions — warnings injected, loops blocked, etc.')
-  .option('-n, --limit <n>', 'Number of events to show', '20')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.activity.desc'))
+  .option('-n, --limit <n>', t('cli.cmd.activity.opt.limit'), '20')
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const { readActivity, formatActivity } = await import('./features/activity-log.js')
     const limit = parseInt(options.limit) || 20
@@ -1067,7 +1072,7 @@ program
       return
     }
 
-    console.log('\nclauditor activity')
+    console.log(t('activity.header'))
     console.log('─'.repeat(50))
     console.log(formatActivity(events))
     console.log('')
@@ -1077,12 +1082,12 @@ program
 
 program
   .command('calibrate')
-  .description('Auto-calibrate rotation threshold from your session history')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.calibrate.desc'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const { calibrate, formatCalibration } = await import('./features/calibration.js')
 
-    if (!options.json) console.log('Scanning session history...')
+    if (!options.json) console.log(t('calibrate.scanning'))
     const result = calibrate()
 
     if (options.json) {
@@ -1094,10 +1099,10 @@ program
     console.log('\n' + formatCalibration(result))
 
     if (result.confident) {
-      console.log(`\n  ✓ Calibrated: will block at ${result.wasteThreshold}x waste, ${result.minTurns}+ turns`)
+      console.log(t('calibrate.success', { threshold: result.wasteThreshold, minTurns: result.minTurns }))
     } else {
-      console.log(`\n  ⚠ Not enough data — using conservative 10x threshold`)
-      console.log(`    Use Claude Code for a few more sessions, then run \`clauditor calibrate\` again`)
+      console.log(t('calibrate.notEnough'))
+      console.log(t('calibrate.notEnoughHint'))
     }
     console.log('')
   })
@@ -1106,9 +1111,9 @@ program
 
 program
   .command('report')
-  .description('Show quota usage report — see where your tokens went')
-  .option('-d, --days <n>', 'Number of days to look back', '7')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.report.desc'))
+  .option('-d, --days <n>', t('cli.cmd.report.opt.days'), '7')
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const { computeQuotaBrief } = await import('./features/quota-report.js')
     const days = parseInt(options.days, 10) || 7
@@ -1120,15 +1125,15 @@ program
     }
 
     if (brief.totalSessions === 0) {
-      console.log('No sessions found in the last ' + days + ' days.')
+      console.log(t('common.noSessionsInRange', { days }))
       return
     }
 
     console.log('')
-    console.log(`  Quota Report — last ${days} days`)
+    console.log(t('report.header', { days }))
     console.log('  ' + '─'.repeat(58))
     console.log('')
-    console.log('  TURNS  BASE   NOW   WASTE  TOKENS')
+    console.log(t('report.columns'))
     console.log('  ' + '─'.repeat(58))
 
     for (const s of brief.sessions) {
@@ -1149,20 +1154,20 @@ program
 
     console.log('  ' + '─'.repeat(58))
     console.log('')
-    console.log(`  ${brief.totalSessions} sessions · ${(brief.totalTokens / 1e6).toFixed(0)}M tokens total`)
+    console.log(t('report.summary', { sessions: brief.totalSessions, tokensM: (brief.totalTokens / 1e6).toFixed(0) }))
     if (brief.sessionsOver5x > 0) {
-      console.log(`  \x1b[31m${brief.sessionsOver5x} sessions burned 5x+ more quota than necessary\x1b[0m`)
+      console.log(`  \x1b[31m${t('report.over5x', { count: brief.sessionsOver5x })}\x1b[0m`)
     }
     if (brief.sessionsOver3x > 0 && brief.sessionsOver3x > brief.sessionsOver5x) {
-      console.log(`  \x1b[33m${brief.sessionsOver3x - brief.sessionsOver5x} more sessions used 3-5x quota\x1b[0m`)
+      console.log(`  \x1b[33m${t('report.over3x', { count: brief.sessionsOver3x - brief.sessionsOver5x })}\x1b[0m`)
     }
 
     if (brief.worstSession && brief.worstSession.wasteFactor >= 3) {
       const w = brief.worstSession
       console.log('')
-      console.log(`  Worst: ${w.label} (${w.turns} turns)`)
-      console.log(`  Started at ${w.baselineK}k/turn, ended at ${w.currentK}k/turn (${w.wasteFactor}x waste)`)
-      console.log(`  With rotation, this session would have used ~${Math.round(w.turns * w.baselineK * 2 / 1000)}M tokens instead of ${Math.round(w.totalTokens / 1e6)}M`)
+      console.log(t('report.worstLabel', { label: w.label, turns: w.turns }))
+      console.log(t('report.worstDetail', { base: w.baselineK, now: w.currentK, waste: w.wasteFactor }))
+      console.log(t('report.worstCounterfactual', { savedM: Math.round(w.turns * w.baselineK * 2 / 1000), actualM: Math.round(w.totalTokens / 1e6) }))
     }
 
     // Clauditor impact
@@ -1171,20 +1176,20 @@ program
       const pctSaved = Math.round(saved / brief.totalTokens * 100)
       console.log('')
       console.log('  ' + '─'.repeat(58))
-      console.log(`  \x1b[36mclauditor impact\x1b[0m`)
+      console.log(`  \x1b[36m${t('report.impactHeader').trim()}\x1b[0m`)
       if (brief.sessionsBlocked > 0) {
-        console.log(`  Blocked ${brief.sessionsBlocked} session${brief.sessionsBlocked > 1 ? 's' : ''} from burning more quota`)
+        console.log(t('report.impactBlocked', { count: brief.sessionsBlocked, plural: brief.sessionsBlocked > 1 ? 's' : '' }))
       }
-      console.log(`  With rotation on all sessions: ${Math.round(brief.tokensWithRotation / 1e6)}M tokens instead of ${Math.round(brief.totalTokens / 1e6)}M`)
-      console.log(`  \x1b[32mPotential savings: ${Math.round(saved / 1e6)}M tokens (${pctSaved}% less quota)\x1b[0m`)
+      console.log(t('report.impactRotation', { withM: Math.round(brief.tokensWithRotation / 1e6), actualM: Math.round(brief.totalTokens / 1e6) }))
+      console.log(`  \x1b[32m${t('report.impactSavings', { savedM: Math.round(saved / 1e6), pct: pctSaved }).trim()}\x1b[0m`)
     }
 
     if (brief.sessionsOnBuggyVersion > 0) {
       console.log('')
       console.log('  ' + '─'.repeat(58))
-      console.log(`  \x1b[31m⚠ ${brief.sessionsOnBuggyVersion} session${brief.sessionsOnBuggyVersion > 1 ? 's' : ''} ran on Claude Code 2.1.69-2.1.89 (known cache bug)\x1b[0m`)
-      console.log(`  This bug causes 10-20x token burn from broken prompt caching.`)
-      console.log(`  Fix: upgrade to v2.1.91+ with \x1b[1mclaude update\x1b[0m`)
+      console.log(`  \x1b[31m${t('report.buggyVersion', { count: brief.sessionsOnBuggyVersion, plural: brief.sessionsOnBuggyVersion > 1 ? 's' : '' }).trim()}\x1b[0m`)
+      console.log(t('report.buggyDetail'))
+      console.log(t('report.buggyFix'))
     }
 
     console.log('')
@@ -1194,9 +1199,9 @@ program
 
 program
   .command('time')
-  .description('Analyze token usage by time of day — detect peak hour impact')
-  .option('-d, --days <n>', 'Number of days to look back', '7')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.time.desc'))
+  .option('-d, --days <n>', t('cli.cmd.report.opt.days'), '7')
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const { computeTimeAnalysis } = await import('./features/quota-report.js')
     const days = parseInt(options.days, 10) || 7
@@ -1209,12 +1214,12 @@ program
 
     const hasData = analysis.hourly.some(h => h.turns > 0)
     if (!hasData) {
-      console.log('No session data found in the last ' + days + ' days.')
+      console.log(t('common.noSessionsInRange', { days }))
       return
     }
 
     console.log('')
-    console.log(`  Token Usage by Hour — last ${days} days`)
+    console.log(t('time.header', { days }))
     console.log('  ' + '─'.repeat(58))
     console.log('')
 
@@ -1241,15 +1246,15 @@ program
 
     console.log('')
     console.log('  ' + '─'.repeat(58))
-    console.log(`  \x1b[33mPeak (9am-5pm):\x1b[0m    ${Math.round(analysis.peakAvgTokens / 1000)}k avg tokens/turn`)
-    console.log(`  \x1b[32mOff-peak:\x1b[0m          ${Math.round(analysis.offPeakAvgTokens / 1000)}k avg tokens/turn`)
+    console.log(`  \x1b[33m${t('time.peakLabel', { k: Math.round(analysis.peakAvgTokens / 1000) }).trim()}\x1b[0m`)
+    console.log(`  \x1b[32m${t('time.offPeakLabel', { k: Math.round(analysis.offPeakAvgTokens / 1000) }).trim()}\x1b[0m`)
 
     if (analysis.peakMultiplier > 1.3) {
-      console.log(`  \x1b[31mPeak multiplier:   ${analysis.peakMultiplier}x (peak hours cost ${analysis.peakMultiplier}x more per turn)\x1b[0m`)
+      console.log(`  \x1b[31m${t('time.peakMultiplierHi', { x: analysis.peakMultiplier }).trim()}\x1b[0m`)
     } else if (analysis.peakMultiplier > 1) {
-      console.log(`  Peak multiplier:   ${analysis.peakMultiplier}x (minimal difference)`)
+      console.log(t('time.peakMultiplierLo', { x: analysis.peakMultiplier }))
     } else {
-      console.log(`  No significant peak/off-peak difference detected.`)
+      console.log(t('time.noDiff'))
     }
 
     console.log('')
@@ -1259,15 +1264,15 @@ program
 
 program
   .command('share')
-  .description('Generate a shareable summary of your Claude Code usage')
-  .option('-d, --days <n>', 'Number of days to look back', '7')
+  .description(t('cli.cmd.share.desc'))
+  .option('-d, --days <n>', t('cli.cmd.report.opt.days'), '7')
   .action(async (options) => {
     const { computeQuotaBrief } = await import('./features/quota-report.js')
     const days = parseInt(options.days, 10) || 7
     const brief = computeQuotaBrief(days)
 
     if (brief.totalSessions === 0) {
-      console.log('No sessions found in the last ' + days + ' days.')
+      console.log(t('common.noSessionsInRange', { days }))
       return
     }
 
@@ -1275,26 +1280,29 @@ program
     const pctSaved = brief.totalTokens > 0 ? Math.round(saved / brief.totalTokens * 100) : 0
 
     const lines: string[] = []
-    lines.push(`My Claude Code usage this week (via clauditor):`)
+    lines.push(t('share.header'))
     lines.push('')
-    lines.push(`• ${brief.totalSessions} sessions, ${brief.sessionsOver5x > 0 ? brief.sessionsOver5x + ' hit 5x+ waste' : 'all efficient'}`)
-    lines.push(`• ${Math.round(brief.totalTokens / 1e6)}M tokens used`)
+    const wasteClause = brief.sessionsOver5x > 0
+      ? t('share.over5x', { count: brief.sessionsOver5x })
+      : t('share.allEfficient')
+    lines.push(t('share.sessions', { count: brief.totalSessions, waste: wasteClause }))
+    lines.push(t('share.tokens', { m: Math.round(brief.totalTokens / 1e6) }))
 
     if (pctSaved > 0) {
-      lines.push(`• With session rotation: ${Math.round(brief.tokensWithRotation / 1e6)}M tokens (${pctSaved}% less quota)`)
+      lines.push(t('share.rotation', { m: Math.round(brief.tokensWithRotation / 1e6), pct: pctSaved }))
     }
 
     if (brief.sessionsBlocked > 0) {
-      lines.push(`• clauditor blocked ${brief.sessionsBlocked} session${brief.sessionsBlocked > 1 ? 's' : ''} before they burned more quota`)
+      lines.push(t('share.blocked', { count: brief.sessionsBlocked, plural: brief.sessionsBlocked > 1 ? 's' : '' }))
     }
 
     if (brief.worstSession && brief.worstSession.wasteFactor >= 3) {
       const w = brief.worstSession
-      lines.push(`• Worst session: ${w.turns} turns, ${w.wasteFactor}x waste (${w.baselineK}k→${w.currentK}k tokens/turn)`)
+      lines.push(t('share.worst', { turns: w.turns, waste: w.wasteFactor, base: w.baselineK, now: w.currentK }))
     }
 
     if (brief.avgCacheRatio > 0) {
-      lines.push(`• Avg cache hit ratio: ${Math.round(brief.avgCacheRatio * 100)}%`)
+      lines.push(t('share.cacheAvg', { pct: Math.round(brief.avgCacheRatio * 100) }))
     }
 
     lines.push('')
@@ -1309,15 +1317,15 @@ program
       const platform = process.platform
       if (platform === 'darwin') {
         execSync('pbcopy', { input: output })
-        console.log('\n\x1b[32m✓ Copied to clipboard\x1b[0m')
+        console.log(`\x1b[32m${t('share.copied')}\x1b[0m`)
       } else if (platform === 'linux') {
         try {
           execSync('xclip -selection clipboard', { input: output })
-          console.log('\n\x1b[32m✓ Copied to clipboard\x1b[0m')
+          console.log(`\x1b[32m${t('share.copied')}\x1b[0m`)
         } catch {
           try {
             execSync('xsel --clipboard --input', { input: output })
-            console.log('\n\x1b[32m✓ Copied to clipboard\x1b[0m')
+            console.log(`\x1b[32m${t('share.copied')}\x1b[0m`)
           } catch {
             // No clipboard tool available — that's fine
           }
@@ -1332,10 +1340,10 @@ program
 
 program
   .command('sessions')
-  .description('List recent sessions — see where your tokens went')
-  .option('-d, --days <n>', 'Number of days to look back', '7')
-  .option('-p, --project <path>', 'Filter by project')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.sessions.desc'))
+  .option('-d, --days <n>', t('cli.cmd.report.opt.days'), '7')
+  .option('-p, --project <path>', t('cli.cmd.sessions.opt.project'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const config = await loadConfig()
     const { SessionStore } = await import('./daemon/store.js')
@@ -1348,7 +1356,7 @@ program
       projectPath: options.project ? resolve(options.project) : undefined,
     })
 
-    if (!options.json) console.log('Scanning session files...')
+    if (!options.json) console.log(t('common.scanning'))
     await watcher.scanAll()
 
     const daysAgo = parseInt(options.days) || 7
@@ -1361,7 +1369,7 @@ program
 
     if (sessions.length === 0) {
       if (options.json) console.log('[]')
-      else console.log('No sessions found.')
+      else console.log(t('common.noSessionsSimple'))
       return
     }
 
@@ -1396,7 +1404,7 @@ program
       return
     }
 
-    console.log(`\nSessions from last ${daysAgo} days (${sessions.length} total):`)
+    console.log(t('sessions.header', { days: daysAgo, count: sessions.length }))
     console.log('─'.repeat(80))
 
     for (const s of sessions) {
@@ -1434,20 +1442,24 @@ program
 
       // Show spike warning
       if (spikeTurns.length > 0) {
-        const maxSpike = Math.max(...spikeTurns.map((t) =>
-          t.usage.input_tokens + t.usage.output_tokens +
-          t.usage.cache_creation_input_tokens + t.usage.cache_read_input_tokens
+        const maxSpike = Math.max(...spikeTurns.map((turn) =>
+          turn.usage.input_tokens + turn.usage.output_tokens +
+          turn.usage.cache_creation_input_tokens + turn.usage.cache_read_input_tokens
         ))
         console.log(
-          `  \x1b[31m  ⚠ ${spikeTurns.length} token spike${spikeTurns.length === 1 ? '' : 's'} detected ` +
-          `(largest: ${(maxSpike / 1000).toFixed(0)}k tokens in one turn, avg: ${(avgTokens / 1000).toFixed(0)}k)\x1b[0m`
+          `  \x1b[31m${t('sessions.spikes', {
+            count: spikeTurns.length,
+            plural: spikeTurns.length === 1 ? '' : 's',
+            max: (maxSpike / 1000).toFixed(0),
+            avg: (avgTokens / 1000).toFixed(0),
+          })}\x1b[0m`
         )
       }
 
       // Show if cache was degraded
       if (s.cacheHealth.status === 'degraded' || s.cacheHealth.status === 'broken') {
         console.log(
-          `  \x1b[33m  ⚠ Cache ${s.cacheHealth.status} — likely burned extra quota\x1b[0m`
+          `  \x1b[33m${t('sessions.cacheIssue', { status: s.cacheHealth.status })}\x1b[0m`
         )
       }
     }
@@ -1457,19 +1469,19 @@ program
 
 function formatTimeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-  return `${Math.floor(seconds / 86400)}d ago`
+  if (seconds < 60) return t('sessions.justNow')
+  if (seconds < 3600) return t('sessions.minAgo', { n: Math.floor(seconds / 60) })
+  if (seconds < 86400) return t('sessions.hourAgo', { n: Math.floor(seconds / 3600) })
+  return t('sessions.dayAgo', { n: Math.floor(seconds / 86400) })
 }
 
 // ─── clauditor knowledge ─────────────────────────────────────────
 
 program
   .command('knowledge')
-  .description('Show accumulated project knowledge (errors, file activity)')
-  .option('-p, --project <path>', 'Project directory', process.cwd())
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.knowledge.desc'))
+  .option('-p, --project <path>', t('cli.cmd.knowledge.opt.project'), process.cwd())
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const { readErrorIndex } = await import('./features/error-index.js')
     const { readFileIndex } = await import('./features/file-tracker.js')
@@ -1484,21 +1496,21 @@ program
     }
 
     console.log('')
-    console.log(`  Project Knowledge — ${cwd}`)
+    console.log(t('knowledge.header', { cwd }))
     console.log('  ' + '─'.repeat(58))
 
     // Errors
     if (errors.length > 0) {
       console.log('')
-      console.log(`  \x1b[31mKnown Errors (${errors.length})\x1b[0m`)
+      console.log(`  \x1b[31m${t('knowledge.errorsLabel', { count: errors.length }).trim()}\x1b[0m`)
       for (const e of errors.slice(0, 10)) {
-        console.log(`  ${e.command.slice(0, 50)} — ${e.occurrences}x`)
-        console.log(`    Error: ${e.error.slice(0, 80)}`)
-        if (e.fix) console.log(`    \x1b[32mFix: ${e.fix.slice(0, 80)}\x1b[0m`)
+        console.log(t('knowledge.errorItem', { command: e.command.slice(0, 50), count: e.occurrences }))
+        console.log(t('knowledge.errorMsg', { msg: e.error.slice(0, 80) }))
+        if (e.fix) console.log(`    \x1b[32m${t('knowledge.errorFix', { fix: e.fix.slice(0, 80) }).trim()}\x1b[0m`)
       }
     } else {
       console.log('')
-      console.log('  No errors recorded yet.')
+      console.log(t('knowledge.noErrors'))
     }
 
     // Files
@@ -1508,17 +1520,17 @@ program
 
     if (hotFiles.length > 0) {
       console.log('')
-      console.log(`  \x1b[33mFrequently Modified Files\x1b[0m`)
+      console.log(`  \x1b[33m${t('knowledge.filesLabel').trim()}\x1b[0m`)
       for (const [name, f] of hotFiles.slice(0, 15)) {
         console.log(`  ${name.padEnd(40)} ${String(f.editCount).padStart(3)} edits  ${String(f.sessions).padStart(2)} sessions  last: ${f.lastEdited}`)
       }
     } else {
       console.log('')
-      console.log('  No file activity recorded yet.')
+      console.log(t('knowledge.noFiles'))
     }
 
     console.log('')
-    console.log('  Knowledge accumulates automatically as you use Claude Code.')
+    console.log(t('knowledge.footer'))
     console.log('')
   })
 
@@ -1526,9 +1538,9 @@ program
 
 program
   .command('suggest-skill')
-  .description('Find repeating workflows and suggest saving them as skills')
-  .option('-p, --project <path>', 'Scan a specific project')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.suggestSkill.desc'))
+  .option('-p, --project <path>', t('cli.cmd.suggestSkill.opt.project'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const config = await loadConfig()
     const { SessionStore } = await import('./daemon/store.js')
@@ -1545,7 +1557,7 @@ program
       projectPath: options.project ? resolve(options.project) : undefined,
     })
 
-    if (!options.json) console.log('Scanning session files for repeating workflows...')
+    if (!options.json) console.log(t('common.scanningHeader'))
     await watcher.scanAll()
 
     const sessions = store.getAll()
@@ -1562,16 +1574,16 @@ program
       return
     }
 
-    console.log('\nSkill suggestions')
+    console.log(t('suggestSkill.header'))
     console.log('─'.repeat(55))
 
     if (suggestions.length === 0) {
-      console.log('  No repeating workflows found yet.')
-      console.log('  Use Claude Code for a few more sessions — patterns emerge over time.')
+      console.log(t('suggestSkill.none'))
+      console.log(t('suggestSkill.noneHint'))
     } else {
       console.log(formatSkillSuggestions(suggestions))
-      console.log('  To enable automatic suggestions, run: clauditor install')
-      console.log('  Claude will offer to create these skills at session start.')
+      console.log(t('suggestSkill.enableAuto'))
+      console.log(t('suggestSkill.enableAutoHint'))
     }
     console.log('')
   })
@@ -1580,53 +1592,53 @@ program
 
 const hookCmd = program
   .command('hook')
-  .description('Internal hook handlers (called by Claude Code)')
+  .description(t('cli.cmd.hook.desc'))
 
 hookCmd
   .command('stop')
-  .description('Stop hook handler')
+  .description(t('cli.cmd.hook.stop.desc'))
   .action(async () => {
     await import('./hooks/stop.js')
   })
 
 hookCmd
   .command('post-tool-use')
-  .description('PostToolUse hook handler')
+  .description(t('cli.cmd.hook.postToolUse.desc'))
   .action(async () => {
     await import('./hooks/post-tool-use.js')
   })
 
 hookCmd
   .command('pre-tool-use')
-  .description('PreToolUse hook handler')
+  .description(t('cli.cmd.hook.preToolUse.desc'))
   .action(async () => {
     await import('./hooks/pre-tool-use.js')
   })
 
 hookCmd
   .command('user-prompt-submit')
-  .description('UserPromptSubmit hook handler — blocks oversized sessions')
+  .description(t('cli.cmd.hook.userPromptSubmit.desc'))
   .action(async () => {
     await import('./hooks/user-prompt-submit.js')
   })
 
 hookCmd
   .command('pre-compact')
-  .description('PreCompact hook handler — saves context before compaction')
+  .description(t('cli.cmd.hook.preCompact.desc'))
   .action(async () => {
     await import('./hooks/pre-compact.js')
   })
 
 hookCmd
   .command('post-compact')
-  .description('PostCompact hook handler — captures Claude\'s own session summary')
+  .description(t('cli.cmd.hook.postCompact.desc'))
   .action(async () => {
     await import('./hooks/post-compact.js')
   })
 
 hookCmd
   .command('session-start')
-  .description('SessionStart hook handler')
+  .description(t('cli.cmd.hook.sessionStart.desc'))
   .action(async () => {
     await import('./hooks/session-start.js')
   })
@@ -1666,8 +1678,8 @@ if (!isHook) {
       const cmd = getUpgradeCommand(getInstallMethod())
       // Show after command output
       process.on('exit', () => {
-        console.error(`\n  clauditor update available: ${pkg.version} → ${latest}`)
-        console.error(`  Run: ${cmd}\n`)
+        console.error(t('update.header', { current: pkg.version, latest }))
+        console.error(t('update.hint', { cmd }))
       })
     }
   } catch {}
@@ -1677,10 +1689,10 @@ if (!isHook) {
 
 program
   .command('handoff-report')
-  .description('Measure information preservation of the last session handoff')
-  .option('-t, --transcript <path>', 'Path to a specific transcript JSONL file')
-  .option('-s, --summary <path>', 'Path to a specific handoff summary file')
-  .option('--json', 'Output as JSON')
+  .description(t('cli.cmd.handoffReport.desc'))
+  .option('-t, --transcript <path>', t('cli.cmd.handoffReport.opt.transcript'))
+  .option('-s, --summary <path>', t('cli.cmd.handoffReport.opt.summary'))
+  .option('--json', t('cli.cmd.status.opt.json'))
   .action(async (options) => {
     const { readdirSync, readFileSync, statSync } = await import('node:fs')
     const { extractFacts, scoreHandoff, generateReport } = await import('./features/handoff-quality.js')
@@ -1717,7 +1729,7 @@ program
     }
 
     if (!transcriptPath) {
-      console.error('No transcript found. Specify one with --transcript <path>')
+      console.error(t('handoffReport.errNoTranscript'))
       process.exit(1)
     }
 
@@ -1743,7 +1755,7 @@ program
     } else {
       const handoffs = readRecentHandoffs()
       if (handoffs.length === 0) {
-        console.error('No recent handoff found. Specify one with --summary <path>')
+        console.error(t('handoffReport.errNoHandoff'))
         process.exit(1)
       }
       // Prefer handoff from the same project as the transcript
@@ -1756,7 +1768,7 @@ program
     // Extract and score
     const facts = extractFacts(transcriptPath)
     if (facts.length === 0) {
-      console.log('No verifiable facts found in the transcript.')
+      console.log(t('handoffReport.noFacts'))
       return
     }
 
@@ -1767,7 +1779,7 @@ program
     } else {
       if (transcriptCwd) {
         const projectName = transcriptCwd.split('/').pop() || transcriptCwd
-        console.log(`Project: ${projectName}\n`)
+        console.log(t('handoffReport.project', { name: projectName }))
       }
       console.log(generateReport(score))
     }

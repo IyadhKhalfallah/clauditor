@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, copyFile, access } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
+import { t } from './i18n.js'
 
 const DEFAULT_CLAUDE_DIR = resolve(homedir(), '.claude')
 
@@ -91,7 +92,7 @@ export async function installHooks(claudeDir?: string): Promise<string[]> {
     )
 
     if (alreadyInstalled) {
-      messages.push(`${eventName}: already installed (skipped)`)
+      messages.push(t('install.alreadyInstalled', { event: eventName }))
       continue
     }
 
@@ -103,17 +104,15 @@ export async function installHooks(claudeDir?: string): Promise<string[]> {
     )
 
     if (conflicting.length > 0) {
-      messages.push(
-        `${eventName}: ⚠ existing hook with same matcher "${hookConfig.matcher}" found — adding clauditor alongside it`
-      )
+      messages.push(t('install.conflict', { event: eventName, matcher: hookConfig.matcher }))
     }
 
     existingHooks.push(hookConfig)
-    messages.push(`${eventName}: ✓ installed`)
+    messages.push(t('install.installed', { event: eventName }))
   }
 
   await writeSettings(settings, claudeDir)
-  messages.push(`\nSettings written to ${settingsPath(claudeDir)}`)
+  messages.push(t('install.settingsWritten', { path: settingsPath(claudeDir) }))
 
   // Install the /save-skill skill
   const skillMessages = await installSaveSkill(claudeDir)
@@ -127,9 +126,9 @@ export async function installHooks(claudeDir?: string): Promise<string[]> {
   const { calibrate } = await import('./features/calibration.js')
   const cal = calibrate()
   if (cal.confident) {
-    messages.push(`Session rotation: ✓ calibrated — blocks at ${cal.wasteThreshold}x waste, ${cal.minTurns}+ turns (from ${cal.sessionsAnalyzed} sessions)`)
+    messages.push(t('install.calibrated', { threshold: cal.wasteThreshold, minTurns: cal.minTurns, sessions: cal.sessionsAnalyzed }))
   } else {
-    messages.push(`Session rotation: ✓ enabled — using conservative 10x threshold (will auto-calibrate after more sessions)`)
+    messages.push(t('install.conservative'))
   }
 
   return messages
@@ -147,7 +146,7 @@ async function installSaveSkill(claudeDir?: string): Promise<string[]> {
     // Check if already installed
     try {
       await access(skillPath)
-      messages.push('/save-skill: already installed (skipped)')
+      messages.push(t('install.skillAlreadyInstalled'))
       return messages
     } catch {
       // Not installed yet
@@ -170,9 +169,9 @@ async function installSaveSkill(claudeDir?: string): Promise<string[]> {
     }
 
     const displayDir = dir.replace(homedir(), '~')
-    messages.push(`/save-skill: ✓ installed to ${displayDir}/`)
+    messages.push(t('install.skillInstalled', { dir: displayDir }))
   } catch (err) {
-    messages.push(`/save-skill: ⚠ failed to install — ${err}`)
+    messages.push(t('install.skillFailed', { error: String(err) }))
   }
 
   return messages
@@ -220,7 +219,7 @@ export async function uninstallHooks(claudeDir?: string): Promise<string[]> {
   const messages: string[] = []
 
   if (!settings.hooks) {
-    messages.push('No hooks configured — nothing to remove')
+    messages.push(t('install.nothingToRemove'))
     return messages
   }
 
@@ -234,7 +233,7 @@ export async function uninstallHooks(claudeDir?: string): Promise<string[]> {
 
     const removed = before - settings.hooks[eventName].length
     if (removed > 0) {
-      messages.push(`${eventName}: ✓ removed ${removed} clauditor hook(s)`)
+      messages.push(t('install.removed', { event: eventName, count: removed }))
     }
 
     // Clean up empty arrays
@@ -249,7 +248,7 @@ export async function uninstallHooks(claudeDir?: string): Promise<string[]> {
   }
 
   await writeSettings(settings, claudeDir)
-  messages.push(`\nSettings written to ${settingsPath(claudeDir)}`)
+  messages.push(t('install.settingsWritten', { path: settingsPath(claudeDir) }))
 
   // Remove /save-skill
   const dir = skillDir(claudeDir)
@@ -258,7 +257,7 @@ export async function uninstallHooks(claudeDir?: string): Promise<string[]> {
     await access(saveSkillPath)
     const { rm } = await import('node:fs/promises')
     await rm(dir, { recursive: true })
-    messages.push('/save-skill: ✓ removed')
+    messages.push(t('install.skillRemoved'))
   } catch {
     // Not installed
   }
