@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.30.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.29.1...v1.30.0) (2026-04-14)
+
+
+### Features
+
+* **init:** add `clauditor init` to wire AI tool into team knowledge ([#123](https://github.com/IyadhKhalfallah/clauditor/issues/123)) ([2a4620b](https://github.com/IyadhKhalfallah/clauditor/commit/2a4620b2012576b74e8e48defb682c93609308d7))
+
 ## [1.29.1](https://github.com/IyadhKhalfallah/clauditor/compare/v1.29.0...v1.29.1) (2026-04-12)
 
 
