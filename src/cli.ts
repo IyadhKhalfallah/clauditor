@@ -471,11 +471,118 @@ async function loginDeviceFlow(hubUrl: string, remoteUrl: string, developerHash:
     console.log(`\n  ✓ Logged in to team "${result.team_name}" (${result.plan})`)
     console.log(`  Connected: ${remoteUrl} → ${result.team_name}`)
     console.log(`\n  Knowledge will sync automatically during sessions on this project.`)
+    console.log(`  Next: run \`clauditor init\` to wire your AI tool into team knowledge.`)
   } catch (err) {
     console.error(`\n  ✗ ${err instanceof Error ? err.message : err}`)
     process.exit(1)
   }
 }
+
+// ─── clauditor init ──────────────────────────────────────────────
+
+program
+  .command('init')
+  .description('Add the "## Knowledge" instruction to your AI tool\'s rules file')
+  .option('--tool <tool>', 'claude_code | codex | cursor | claude_desktop | other')
+  .option('--hub-url <url>', 'Hub URL', DEFAULT_HUB_URL)
+  .option('-y, --yes', 'Skip the confirmation prompt')
+  .action(async (options: { tool?: string; hubUrl?: string; yes?: boolean }) => {
+    const { getGitRemoteUrl } = await import('./hub/git-project.js')
+    const { getProjectHubConfig } = await import('./config.js')
+    const {
+      detectTool,
+      pathForTool,
+      writeInstruction,
+      notifyHub,
+      INSTRUCTION_BLOCK,
+    } = await import('./hub/init-instruction.js')
+
+    const remoteUrl = getGitRemoteUrl()
+    const cwd = process.cwd()
+
+    // Resolve tool: --tool flag → detection → interactive prompt
+    const validTools = ['claude_code', 'codex', 'cursor', 'claude_desktop', 'other'] as const
+    type Tool = typeof validTools[number]
+
+    let tool: Tool | null = null
+    if (options.tool) {
+      if (!validTools.includes(options.tool as Tool)) {
+        console.error(`\n  ✗ Unknown tool "${options.tool}". Valid: ${validTools.join(', ')}`)
+        process.exit(1)
+      }
+      tool = options.tool as Tool
+    } else {
+      const detected = detectTool(cwd)
+      if (detected) {
+        tool = detected
+        console.log(`\n  Detected ${tool} from existing config file.`)
+      } else {
+        const readline = await import('node:readline')
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+        console.log('\n  Which AI tool are you using?')
+        validTools.forEach((t, i) => console.log(`    ${i + 1}. ${t}`))
+        const answer = await new Promise<string>((r) => rl.question('\n  Choice (1-5): ', (a) => { rl.close(); r(a.trim()) }))
+        const choice = parseInt(answer, 10)
+        if (!choice || choice < 1 || choice > validTools.length) {
+          console.error('\n  ✗ Invalid choice.')
+          process.exit(1)
+        }
+        tool = validTools[choice - 1]
+      }
+    }
+
+    const target = pathForTool(tool)
+
+    if (!target) {
+      console.log(`\n  ${tool === 'claude_desktop' ? 'Claude Desktop' : 'Your tool'} has no per-project config file.`)
+      console.log(`  Paste this into your custom instructions or starter prompt:\n`)
+      console.log('  ─────────────────────────────────────────────')
+      console.log(INSTRUCTION_BLOCK.split('\n').map((l) => '  ' + l).join('\n'))
+      console.log('  ─────────────────────────────────────────────')
+      console.log(`\n  When it's in place, click "I've added it" in the dashboard.`)
+      return
+    }
+
+    // Confirm before writing (skip with --yes)
+    if (!options.yes) {
+      const readline = await import('node:readline')
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+      const answer = await new Promise<string>((r) =>
+        rl.question(`\n  Write the "## Knowledge" block to ${target}? (Y/n) `, (a) => { rl.close(); r(a.trim().toLowerCase()) })
+      )
+      if (answer === 'n' || answer === 'no') {
+        console.log('  Aborted.')
+        return
+      }
+    }
+
+    const result = writeInstruction(cwd, tool)
+    if (result.status === 'manual_required') {
+      // Shouldn't reach here — pathForTool already filtered, but be safe.
+      console.log(`\n  Manual step required for ${tool}.`)
+      return
+    }
+
+    if (result.status === 'already_present') {
+      console.log(`\n  ✓ ${result.path} already contains a clauditor knowledge block — left it untouched.`)
+    } else {
+      console.log(`\n  ✓ ${result.created ? 'Created' : 'Updated'} ${result.path}`)
+    }
+
+    // Notify hub (best-effort — older hubs lack this endpoint)
+    if (remoteUrl) {
+      const hubCfg = getProjectHubConfig(remoteUrl)
+      if (hubCfg?.apiKey) {
+        const hubUrl = options.hubUrl || hubCfg.url || DEFAULT_HUB_URL
+        const ok = await notifyHub(hubUrl, hubCfg.apiKey)
+        if (ok) {
+          console.log(`  ✓ Dashboard step marked complete.`)
+        }
+      } else {
+        console.log(`  (Run \`clauditor login\` to sync this to your team's dashboard.)`)
+      }
+    }
+  })
 
 // ─── clauditor sync ──────────────────────────────────────────────
 
