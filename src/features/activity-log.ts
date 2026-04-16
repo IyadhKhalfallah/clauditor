@@ -9,7 +9,7 @@ const MAX_LOG_BYTES = 1_000_000 // rotate at ~1MB
 
 export interface ActivityEvent {
   timestamp: string
-  type: 'cache_warning' | 'loop_blocked' | 'resume_warning' | 'context_warning' | 'bash_compressed' | 'notification' | 'burn_rate_warning'
+  type: 'cache_warning' | 'loop_blocked' | 'resume_warning' | 'context_warning' | 'bash_compressed' | 'notification' | 'burn_rate_warning' | 'auto_rotation'
   session: string
   message: string
 }
@@ -89,6 +89,7 @@ const TYPE_ICONS: Record<ActivityEvent['type'], string> = {
   bash_compressed: '📦',
   notification: '🔔',
   burn_rate_warning: '📈',
+  auto_rotation: '🔄',
 }
 
 /**
