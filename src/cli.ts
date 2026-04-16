@@ -154,6 +154,21 @@ program
     console.log('')
   })
 
+// ─── clauditor run ───────────────────────────────────────────────
+
+program
+  .command('run')
+  .description('Run claude with auto-restart on session rotation')
+  .option('--max-restarts <n>', 'Max consecutive restarts before giving up', '10')
+  .option('--task <prompt>', 'Initial task prompt for the first session')
+  .action(async (opts: { maxRestarts: string; task?: string }) => {
+    const { runWithAutoRotation } = await import('./commands/run.js')
+    await runWithAutoRotation({
+      maxRestarts: parseInt(opts.maxRestarts, 10) || 10,
+      task: opts.task,
+    })
+  })
+
 // ─── clauditor install ────────────────────────────────────────────
 
 program
