@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.31.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.30.0...v1.31.0) (2026-04-16)
+
+
+### Features
+
+* `clauditor run` — auto-restart on session rotation ([#127](https://github.com/IyadhKhalfallah/clauditor/issues/127)) ([#128](https://github.com/IyadhKhalfallah/clauditor/issues/128)) ([91e5b0d](https://github.com/IyadhKhalfallah/clauditor/commit/91e5b0daa5b396e943a40732898e932861fc4633))
+
 ## [1.30.0](https://github.com/IyadhKhalfallah/clauditor/compare/v1.29.1...v1.30.0) (2026-04-14)
 
 
