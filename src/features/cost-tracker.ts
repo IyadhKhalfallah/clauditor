@@ -1,5 +1,6 @@
 import type { TokenUsage, PricingConfig, TurnMetrics } from '../types.js'
 import { MODEL_PRICING } from '../types.js'
+import type { PricingResolver } from '../providers/types.js'
 
 export interface CostEstimate {
   inputCost: number
@@ -49,15 +50,18 @@ export function estimateCost(
 
 /**
  * Detect model from assistant record and return appropriate pricing.
+ * Accepts an optional PricingResolver for multi-provider support.
  */
-export function getPricingForModel(modelId: string): PricingConfig {
-  // Match model IDs like "claude-sonnet-4-6-20260301" to base pricing
+export function getPricingForModel(modelId: string, pricingResolver?: PricingResolver): PricingConfig {
+  if (pricingResolver) {
+    return pricingResolver.getPricing(modelId)
+  }
+  // Fallback: check Claude pricing (backward compat)
   for (const [key, pricing] of Object.entries(MODEL_PRICING)) {
     if (modelId.startsWith(key)) {
       return pricing
     }
   }
-  // Default to Sonnet pricing
   return MODEL_PRICING['claude-sonnet-4-6']
 }
 

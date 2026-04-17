@@ -748,8 +748,8 @@ function extractUserMessage(record: Record<string, unknown>): string | null {
 /**
  * Find transcript path for a session ID.
  */
-export function findTranscriptPathSync(sessionId: string): string | null {
-  const projectsDir = resolve(homedir(), '.claude/projects')
+export function findTranscriptPathSync(sessionId: string, sessionsDir?: string): string | null {
+  const projectsDir = sessionsDir ?? resolve(homedir(), '.claude/projects')
   try {
     const dirs = readdirSync(projectsDir, { withFileTypes: true })
     for (const dir of dirs) {

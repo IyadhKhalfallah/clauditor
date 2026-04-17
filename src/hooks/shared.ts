@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import type { HookDecision } from '../types.js'
+import type { Provider } from '../providers/types.js'
 
 /**
  * Read JSON from stdin — used by all hooks.
@@ -25,11 +26,31 @@ export function outputDecision(decision: HookDecision): void {
 }
 
 /**
- * Find transcript JSONL path for a session ID by scanning ~/.claude/projects/.
+ * Read the --provider flag from process.argv.
+ * Returns 'claude' if not specified.
+ */
+export function getProviderName(): string {
+  const idx = process.argv.indexOf('--provider')
+  return idx !== -1 && process.argv[idx + 1] ? process.argv[idx + 1] : 'claude'
+}
+
+/**
+ * Resolve the active provider from --provider CLI flag.
+ * Falls back to 'claude' if not specified.
+ * Async because ESM dynamic import is async.
+ */
+export async function resolveProvider(): Promise<Provider> {
+  const name = getProviderName()
+  const { registry } = await import('../providers/index.js')
+  return registry.get(name)
+}
+
+/**
+ * Find transcript path for a session ID by scanning the provider's sessions dir.
  * Synchronous — safe for hooks.
  */
-export function findTranscriptPathSync(sessionId: string): string | null {
-  const projectsDir = resolve(homedir(), '.claude/projects')
+export function findTranscriptPathSync(sessionId: string, sessionsDir?: string): string | null {
+  const projectsDir = sessionsDir ?? resolve(homedir(), '.claude/projects')
   try {
     const dirs = readdirSync(projectsDir, { withFileTypes: true })
     for (const dir of dirs) {

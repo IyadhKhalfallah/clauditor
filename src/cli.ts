@@ -173,23 +173,109 @@ program
 
 program
   .command('install')
-  .description('Register clauditor hooks in ~/.claude/settings.json')
+  .description('Register clauditor hooks for your AI coding tools')
+  .option('--provider <name>', 'Install for a specific provider (claude, codex, cursor, windsurf, cline)')
   .option('--claude-dir <path>', 'Path to Claude config directory (default: ~/.claude)')
-  .action(async (opts: { claudeDir?: string }) => {
-    const { installHooks } = await import('./install.js')
-    const messages = await installHooks(opts.claudeDir)
-    for (const msg of messages) {
-      console.log(msg)
+  .action(async (opts: { provider?: string; claudeDir?: string }) => {
+    const { registry } = await import('./providers/index.js')
+
+    // Explicit single provider
+    if (opts.provider) {
+      const provider = registry.get(opts.provider)
+      if (!provider.hooks) {
+        console.log(`${provider.displayName} (Tier ${provider.tier}) does not support hooks.`)
+        console.log('Only session monitoring features are available for this provider.')
+        return
+      }
+      if (opts.provider === 'claude') {
+        // Use the full Claude installer (includes skills, calibration)
+        const { installHooks } = await import('./install.js')
+        const messages = await installHooks(opts.claudeDir)
+        for (const msg of messages) console.log(msg)
+      } else {
+        console.log(`Installing clauditor hooks for ${provider.displayName}...`)
+        const messages = await provider.hooks.install()
+        for (const msg of messages) console.log(msg)
+      }
+      return
     }
+
+    // Default: auto-detect all installed tools
+    const detected = registry.detect()
+    if (detected.length === 0) {
+      console.log('No AI coding tools detected on this machine.')
+      console.log('Supported tools: ' + registry.names().join(', '))
+      return
+    }
+
+    console.log('Detecting AI coding tools...\n')
+    const all = registry.getAll()
+    for (const p of all) {
+      const found = detected.some(d => d.name === p.name)
+      console.log(`  ${found ? '✓' : '✗'} ${p.displayName.padEnd(20)} ${found ? p.directories.configDir().replace(homedir(), '~') : '(not found)'}`)
+    }
+
+    const hookable = detected.filter(p => p.hooks)
+    const monitoring = detected.filter(p => !p.hooks)
+
+    if (hookable.length > 0) {
+      console.log('\nInstalling hooks...\n')
+      for (const provider of hookable) {
+        if (provider.name === 'claude') {
+          // Use the full Claude installer (includes skills, calibration)
+          const { installHooks } = await import('./install.js')
+          const messages = await installHooks(opts.claudeDir)
+          console.log(`  ${provider.displayName}:`)
+          for (const msg of messages) console.log(`    ${msg}`)
+        } else {
+          const messages = await provider.hooks!.install()
+          console.log(`  ${provider.displayName}:`)
+          for (const msg of messages) console.log(`    ${msg}`)
+        }
+      }
+    }
+
+    if (monitoring.length > 0) {
+      console.log(`\n  ${monitoring.map(p => p.displayName).join(', ')}: session monitoring only (no hooks)`)
+    }
+
+    console.log(`\n${hookable.length} provider(s) with hooks installed. Run \`clauditor providers\` to see status.`)
   })
 
 // ─── clauditor uninstall ──────────────────────────────────────────
 
 program
   .command('uninstall')
-  .description('Remove clauditor hooks from ~/.claude/settings.json')
+  .description('Remove clauditor hooks from an AI coding tool')
+  .option('--provider <name>', 'Provider to uninstall hooks from (claude, codex, cursor, windsurf, cline)')
+  .option('--all', 'Uninstall hooks from all providers')
   .option('--claude-dir <path>', 'Path to Claude config directory (default: ~/.claude)')
-  .action(async (opts: { claudeDir?: string }) => {
+  .action(async (opts: { provider?: string; all?: boolean; claudeDir?: string }) => {
+    const { registry } = await import('./providers/index.js')
+
+    if (opts.all) {
+      const detected = registry.detect()
+      for (const provider of detected) {
+        if (!provider.hooks) continue
+        console.log(`\n── ${provider.displayName} ──`)
+        const messages = await provider.hooks.uninstall()
+        for (const msg of messages) console.log(`  ${msg}`)
+      }
+      return
+    }
+
+    if (opts.provider && opts.provider !== 'claude') {
+      const provider = registry.get(opts.provider)
+      if (!provider.hooks) {
+        console.log(`${provider.displayName} does not have hooks to uninstall.`)
+        return
+      }
+      const messages = await provider.hooks.uninstall()
+      for (const msg of messages) console.log(msg)
+      return
+    }
+
+    // Default: Claude Code
     const { uninstallHooks } = await import('./install.js')
     const messages = await uninstallHooks(opts.claudeDir)
     for (const msg of messages) {
@@ -203,7 +289,7 @@ const DEFAULT_HUB_URL = 'https://www.clauditor.ai'
 
 program
   .command('login')
-  .description('Sign in to clauditor hub')
+  .description('Sign in to clauditor hub and set up all detected AI coding tools')
   .option('--hub-url <url>', 'Hub URL', DEFAULT_HUB_URL)
   .option('--device', 'Use device code flow instead of opening browser')
   .action(async (options) => {
@@ -229,26 +315,33 @@ program
     const isSSH = !!(process.env.SSH_CONNECTION || process.env.SSH_TTY || process.env.SSH_CLIENT)
     const useDeviceFlow = options.device || isSSH
 
-    // Auto-install hooks if not already installed
+    // Auto-detect and install hooks for all detected providers
     try {
-      const { existsSync } = await import('node:fs')
-      const { resolve } = await import('node:path')
-      const { homedir } = await import('node:os')
-      const settingsPath = resolve(homedir(), '.claude', 'settings.json')
-      if (existsSync(settingsPath)) {
-        const settings = JSON.parse((await import('node:fs')).readFileSync(settingsPath, 'utf-8'))
-        const hasHooks = settings.hooks && Object.keys(settings.hooks).length > 0
-        if (!hasHooks) {
-          console.log('\n  Setting up clauditor hooks...')
-          const { installHooks } = await import('./install.js')
-          const msgs = await installHooks()
-          msgs.forEach((m: string) => console.log(m))
+      const { registry } = await import('./providers/index.js')
+      const detected = registry.detect()
+      const hookable = detected.filter(p => p.hooks)
+
+      if (hookable.length > 0) {
+        console.log('\n  Detecting AI coding tools...')
+        for (const p of detected) {
+          const hasHooks = p.hooks ? 'hooks' : 'monitoring'
+          console.log(`    ✓ ${p.displayName} (${hasHooks})`)
         }
+
+        console.log('\n  Installing hooks...')
+        for (const provider of hookable) {
+          if (provider.name === 'claude') {
+            const { installHooks } = await import('./install.js')
+            await installHooks()
+            console.log(`    ✓ ${provider.displayName}: hooks installed`)
+          } else {
+            await provider.hooks!.install()
+            console.log(`    ✓ ${provider.displayName}: hooks installed`)
+          }
+        }
+        console.log(`\n  ${hookable.length} provider(s) configured.`)
       } else {
-        console.log('\n  Setting up clauditor hooks...')
-        const { installHooks } = await import('./install.js')
-        const msgs = await installHooks()
-        msgs.forEach((m: string) => console.log(m))
+        console.log('\n  No AI coding tools detected — hooks can be installed later with `clauditor install`')
       }
     } catch {
       // Non-critical — hooks can be installed manually with `clauditor install`
@@ -1591,15 +1684,40 @@ program
     console.log('')
   })
 
+// ─── clauditor providers ─────────────────────────────────────────
+
+program
+  .command('providers')
+  .description('List all supported AI coding tools and their status')
+  .action(async () => {
+    const { registry } = await import('./providers/index.js')
+    const all = registry.getAll()
+    const detected = registry.detect()
+    const detectedNames = new Set(detected.map(p => p.name))
+
+    console.log('Supported AI coding tools:\n')
+    console.log('  Provider            Tier  Hooks  Status')
+    console.log('  ─────────────────── ────  ─────  ──────')
+    for (const p of all) {
+      const status = detectedNames.has(p.name) ? '✓ detected' : '  not found'
+      const hooks = p.hooks ? 'yes' : 'no'
+      const name = p.displayName.padEnd(20)
+      console.log(`  ${name}${p.tier}     ${hooks.padEnd(6)} ${status}`)
+    }
+    console.log(`\nInstall hooks:  clauditor install --provider <name>`)
+    console.log(`Install all:    clauditor install --all`)
+  })
+
 // ─── clauditor hook <name> ───────────────────────────────────────
 
 const hookCmd = program
   .command('hook')
-  .description('Internal hook handlers (called by Claude Code)')
+  .description('Internal hook handlers (called by AI coding tools)')
 
 hookCmd
   .command('stop')
   .description('Stop hook handler')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/stop.js')
   })
@@ -1607,6 +1725,7 @@ hookCmd
 hookCmd
   .command('post-tool-use')
   .description('PostToolUse hook handler')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/post-tool-use.js')
   })
@@ -1614,6 +1733,7 @@ hookCmd
 hookCmd
   .command('pre-tool-use')
   .description('PreToolUse hook handler')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/pre-tool-use.js')
   })
@@ -1621,6 +1741,7 @@ hookCmd
 hookCmd
   .command('user-prompt-submit')
   .description('UserPromptSubmit hook handler — blocks oversized sessions')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/user-prompt-submit.js')
   })
@@ -1628,6 +1749,7 @@ hookCmd
 hookCmd
   .command('pre-compact')
   .description('PreCompact hook handler — saves context before compaction')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/pre-compact.js')
   })
@@ -1635,6 +1757,7 @@ hookCmd
 hookCmd
   .command('post-compact')
   .description('PostCompact hook handler — captures Claude\'s own session summary')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/post-compact.js')
   })
@@ -1642,6 +1765,7 @@ hookCmd
 hookCmd
   .command('session-start')
   .description('SessionStart hook handler')
+  .option('--provider <name>', 'Provider name (default: claude)')
   .action(async () => {
     await import('./hooks/session-start.js')
   })
