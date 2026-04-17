@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import { logActivity } from '../features/activity-log.js'
 import { readStdin, readJsonFile, writeJsonFileAtomic, findTranscriptPathSync } from './shared.js'
+import { initLocaleFromEnv, t } from '../i18n.js'
 
 /**
  * UserPromptSubmit hook — fires BEFORE Claude processes the user's prompt.
@@ -40,6 +41,10 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
     return
   }
 
+  // Check config — also activates the requested locale before any user-facing string
+  const config = readConfig()
+  initLocaleFromEnv(config.locale)
+
   // Check if this is a "continue" prompt — if so, block with handoff context
   // Uses exit code 2 + stderr (same as PostToolUse rotation) which works in both CLI and VS Code
   const continueBlock = checkContinuePrompt(hookInput)
@@ -50,8 +55,6 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
     return
   }
 
-  // Check config
-  const config = readConfig()
   if (!config.rotation.enabled) {
     process.stdout.write('{}')
     return
@@ -127,23 +130,22 @@ export async function handleUserPromptSubmitHook(): Promise<void> {
     // Output block decision
     const filesList = analysis.filesModified.length > 0
       ? analysis.filesModified.slice(0, 10).join(', ')
-      : 'none tracked'
+      : t('block.filesNone')
 
+    const titleLine = t('block.title', { waste: wasteFactor })
     process.stdout.write(JSON.stringify({
       decision: 'block',
       reason:
-        `\n╔══════════════════════════════════════════════════════════════╗\n` +
-        `║  clauditor: Session using ${wasteFactor}x more quota than necessary  ║\n` +
-        `╚══════════════════════════════════════════════════════════════╝\n\n` +
-        `Your turns started at ${Math.round(analysis.baseline / 1000)}k tokens.\n` +
-        `They're now at ${Math.round(analysis.current / 1000)}k tokens.\n` +
-        `Each turn uses ${wasteFactor}x more quota than when this session started.\n\n` +
-        `Session state saved.\n` +
-        `  Branch: ${analysis.branch || 'unknown'}\n` +
-        `  Files: ${filesList}\n` +
-        `  Turns: ${analysis.turns}\n\n` +
-        `Start fresh: run \`claude\` — clauditor will inject your previous session context.\n` +
-        `Or press Enter to continue in this session (not recommended).`,
+        `\n${titleLine}\n\n` +
+        `${t('block.baseline', { base: Math.round(analysis.baseline / 1000) })}\n` +
+        `${t('block.current', { now: Math.round(analysis.current / 1000) })}\n` +
+        `${t('block.perTurn', { waste: wasteFactor })}\n\n` +
+        `${t('block.saved')}\n` +
+        `${t('block.branch', { branch: analysis.branch || t('block.branchUnknown') })}\n` +
+        `${t('block.files', { files: filesList })}\n` +
+        `${t('block.turns', { turns: analysis.turns })}\n\n` +
+        `${t('block.startFresh')}\n` +
+        `${t('block.orContinue')}`,
     }))
   } catch {
     process.stdout.write('{}')
@@ -289,10 +291,14 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
     return ` [${name}]`
   }
 
+  const formatTimeAgo = (ms: number): string => {
+    const mins = Math.round((Date.now() - ms) / 60000)
+    return mins < 60 ? t('continue.minAgo', { n: mins }) : t('continue.hourAgo', { n: Math.round(mins / 60) })
+  }
+
   if (handoffs.length === 1) {
     const h = handoffs[0]
-    const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
-    const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+    const timeStr = formatTimeAgo(h.timestamp)
     const desc = extractHandoffDescription(h)
     const shortPath = shortenPath(h.path)
     const label = projectLabel(h)
@@ -300,25 +306,22 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
     return {
       decision: 'block',
       reason:
-        `\n╔══════════════════════════════════════════════════════════════╗\n` +
-        `║  clauditor: Previous session found (saved ${timeStr})        ║\n` +
-        `╚══════════════════════════════════════════════════════════════╝\n\n` +
+        `\n${t('continue.titleSingle', { timeAgo: timeStr })}\n\n` +
         `  ${desc}${label}\n\n` +
-        `To continue, copy and paste this:\n\n` +
-        `  read ${shortPath} and continue where I left off\n\n` +
-        `Or type something else to start fresh.`,
+        `${t('continue.copyHint')}\n\n` +
+        `${t('continue.command', { path: shortPath })}\n\n` +
+        `${t('continue.orElse')}`,
     }
   }
 
   // Multiple handoffs — present choice with copyable prompts
   const choices = handoffs.slice(0, 5).map((h, i) => {
-    const timeAgo = Math.round((Date.now() - h.timestamp) / 60000)
-    const timeStr = timeAgo < 60 ? `${timeAgo}m ago` : `${Math.round(timeAgo / 60)}h ago`
+    const timeStr = formatTimeAgo(h.timestamp)
     const desc = extractHandoffDescription(h)
     const shortPath = shortenPath(h.path)
     const label = projectLabel(h)
 
-    return `  ${i + 1}. (${timeStr}) ${desc}${label}\n     → read ${shortPath} and continue where I left off`
+    return `${t('continue.multiItem', { i: i + 1, timeAgo: timeStr, desc, label })}\n${t('continue.multiCommand', { path: shortPath })}`
   })
 
   const lines = choices.join('\n\n')
@@ -326,16 +329,14 @@ function checkContinuePrompt(hookInput: UserPromptSubmitInput): { decision: stri
   return {
     decision: 'block',
     reason:
-      `\n╔══════════════════════════════════════════════════════════════╗\n` +
-      `║  clauditor: ${handoffs.length} recent sessions found                       ║\n` +
-      `╚══════════════════════════════════════════════════════════════╝\n\n` +
+      `\n${t('continue.titleMulti', { count: handoffs.length })}\n\n` +
       lines + `\n\n` +
-      `Copy one of the → lines above, or type something else to start fresh.`,
+      `${t('continue.multiFooter')}`,
   }
 }
 
 handleUserPromptSubmitHook().catch((err) => {
-  process.stderr.write(`clauditor user-prompt-submit hook error: ${err}\n`)
+  process.stderr.write(t('hookErr.userPromptSubmit', { error: String(err) }))
   process.stdout.write('{}')
   process.exit(0)
 })

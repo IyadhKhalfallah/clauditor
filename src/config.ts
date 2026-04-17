@@ -24,6 +24,8 @@ export interface ClauditorUserConfig {
   notifications: {
     desktop: boolean
   }
+  /** ISO language code for user-facing messages (e.g. "en", "es"). Falls back to $LANG, then "en". */
+  locale?: string
   /** Per-project hub config, keyed by normalized git remote URL */
   projects?: Record<string, ProjectHubConfig>
 }
@@ -49,6 +51,7 @@ export function readConfig(): ClauditorUserConfig {
     return {
       rotation: { ...DEFAULTS.rotation, ...raw.rotation },
       notifications: { ...DEFAULTS.notifications, ...raw.notifications },
+      locale: typeof raw.locale === 'string' ? raw.locale : undefined,
       projects: raw.projects ? { ...raw.projects } : undefined,
     }
   } catch {
