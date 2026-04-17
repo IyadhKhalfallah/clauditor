@@ -229,6 +229,8 @@ function analyzeSession(transcriptPath: string): SessionAnalysis | null {
  *   "continue", "continue where I left off", "pick up where we left off",
  *   "resume", "resume previous session", "keep going", "carry on",
  *   "what were we working on", "where did we leave off"
+ * Also matches Spanish equivalents so translated `continue.command` strings
+ * still trigger the handoff injection.
  */
 const CONTINUE_PATTERNS = [
   /^\s*continue\s*$/i,
@@ -245,6 +247,16 @@ const CONTINUE_PATTERNS = [
   /^\s*start\s+from\s+where/i,
   /^\s*pick\s+it\s+up/i,
   /^\s*back\s+to\s+(work|where)/i,
+  // Spanish variants — match the translated `continue.command` string
+  // ("lee {path} y continúa donde lo dejé") and common rephrasings.
+  /^\s*contin[úu]a\b/i,
+  /^\s*continuemos\b/i,
+  /\by\s+contin[úu]a\s+donde/i,
+  /^\s*sigue\s+(donde|desde|con|ah[íi])/i,
+  /^\s*retoma\b/i,
+  /^\s*reanuda\b/i,
+  /^\s*d[oó]nde\s+(nos\s+)?quedamos/i,
+  /^\s*qu[eé]\s+est[áa]bamos\s+(haciendo|trabajando)/i,
 ]
 
 function isContinuePrompt(prompt: string): boolean {
