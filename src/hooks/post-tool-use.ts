@@ -47,12 +47,33 @@ export async function handlePostToolUseHook(): Promise<void> {
   outputDecision(decision)
 }
 
+/**
+ * Claude Code sends `tool_response` as either a raw string (legacy tools) or a
+ * structured object (e.g. Bash: {stdout, stderr, interrupted, ...}). Downstream
+ * code here calls .length / .includes / .slice on it, so we normalize to a
+ * string. Objects are JSON-encoded — preserving substring matches on the field
+ * names and values (an object whose stderr contains "error" still triggers the
+ * error-detection path).
+ */
+export function normalizeToolResponse(raw: unknown): string {
+  if (typeof raw === 'string') return raw
+  // Matches the original `input.tool_response || ''` semantics: any falsy
+  // value (null, undefined, 0, false, NaN) collapses to an empty string.
+  if (!raw) return ''
+  try {
+    return JSON.stringify(raw)
+  } catch {
+    // Circular references or BigInt; fall back to a safe coercion.
+    return String(raw)
+  }
+}
+
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
   const parts: string[] = []
 
   // 1. Compress bash output if applicable
   if (input.tool_name === 'Bash') {
-    const toolResponse = input.tool_response || ''
+    const toolResponse = normalizeToolResponse(input.tool_response)
     if (toolResponse.length >= 500) {
       const result = compressBashOutput(toolResponse)
       if (result.compressed) {

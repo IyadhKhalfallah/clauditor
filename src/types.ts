@@ -195,7 +195,12 @@ export interface PostToolUseHookInput {
   hook_event_name: 'PostToolUse'
   tool_name: string
   tool_input: Record<string, unknown>
-  tool_response: string
+  /**
+   * Claude Code sends either a raw string (legacy tools) or a structured object
+   * (e.g. Bash: {stdout, stderr, interrupted, ...}). Callers must normalize
+   * before using string methods like .includes() or .slice().
+   */
+  tool_response: string | Record<string, unknown>
 }
 
 export interface PreToolUseHookInput {
