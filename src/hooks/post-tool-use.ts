@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
-import { compressBashOutput } from '../features/bash-filter.js'
+import { compressToolOutput } from '../features/output-compressor.js'
+import { isTurbo, TURBO_THRESHOLDS } from '../config.js'
 import { recordError, recordFix, recordOutcome, extractBaseCommand, trackCommand, clearCommandBuffer } from '../features/error-index.js'
 import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
 import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
@@ -85,27 +86,31 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
   const cwd = input.cwd || null
 
 
-  // 1. Compress bash output if applicable
+  // 1. Compress verbose tool output. Bash has had compression for a while;
+  // Grep/Glob/WebFetch/WebSearch are handled through the same dispatch so
+  // we don't burn tokens on 500-line Grep dumps or 50k-char WebFetch blobs.
+  const COMPRESSIBLE_TOOLS = new Set(['Bash', 'Grep', 'Glob', 'WebFetch', 'WebSearch'])
+  if (COMPRESSIBLE_TOOLS.has(input.tool_name)) {
+    const toolResponse = input.tool_response || ''
+    const result = compressToolOutput({
+      toolName: input.tool_name,
+      output: toolResponse,
+      toolInput: input.tool_input as Record<string, unknown> | undefined,
+    })
+    if (result.compressed) {
+      parts.push(
+        `[clauditor]: ${input.tool_name} output compressed ${formatSize(result.originalLength)} to ${formatSize(result.compressedLength)}.`
+      )
+      logActivity({
+        type: 'bash_compressed',
+        session: input.session_id.slice(0, 8),
+        message: `Compressed ${input.tool_name} output: ${formatSize(result.originalLength)} to ${formatSize(result.compressedLength)}`,
+      }).catch(() => {})
+    }
+  }
+
   if (input.tool_name === 'Bash') {
     const toolResponse = input.tool_response || ''
-    if (toolResponse.length >= 500) {
-      const result = compressBashOutput(toolResponse)
-      if (result.compressed) {
-        const command =
-          typeof input.tool_input?.command === 'string'
-            ? input.tool_input.command.slice(0, 100)
-            : 'command'
-        parts.push(
-          `[clauditor]: \`${command}\` output compressed from ` +
-          `${formatSize(result.originalLength)} to ${formatSize(result.compressedLength)}.`
-        )
-        logActivity({
-          type: 'bash_compressed',
-          session: input.session_id.slice(0, 8),
-          message: `Compressed bash output: ${formatSize(result.originalLength)} → ${formatSize(result.compressedLength)}`,
-        }).catch(() => {})
-      }
-    }
 
     // Track every command for fix detection
     const cmd = typeof input.tool_input?.command === 'string' ? input.tool_input.command : ''
@@ -113,7 +118,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
       try { trackCommand(cwd, cmd) } catch {}
     }
 
-    // 1b. Post-error guidance — catch failing commands at attempt 1
+    // 1b. Post-error guidance. Catch failing commands at attempt 1.
     const errorGuidance = detectBashError(input.session_id, toolResponse)
     if (errorGuidance) {
       parts.push(errorGuidance)
@@ -225,8 +230,8 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
     const filePath = (input.tool_input?.file_path as string) || ''
     if (filePath && cwd) {
       try { recordFileRead(cwd, filePath, input.session_id) } catch {}
-      // Inject context for hot files (5+ edits, 3+ sessions)
-      const fileCtx = getFileContext(cwd, filePath)
+      // Inject context for hot files (5+ edits, 3+ sessions), once per session per file
+      const fileCtx = getFileContext(cwd, filePath, input.session_id)
       if (fileCtx) {
         parts.push(fileCtx)
       }
@@ -353,10 +358,8 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
     const cacheHealth = detectCacheDegradation(turns)
     if (cacheHealth.degradationDetected) {
       warnings.push(
-        `[clauditor WARNING]: This session's cache is broken — responses will be significantly slower. ` +
-        `Cache hit ratio is ${(cacheHealth.lastCacheRatio * 100).toFixed(0)}% (should be >70%). ` +
-        `The full conversation is being re-read from scratch each turn instead of using cache. ` +
-        `Recommend telling the user to run /clear and re-state what they're working on, or start a fresh session.`
+        `[clauditor]: Cache broken (hit ratio ${(cacheHealth.lastCacheRatio * 100).toFixed(0)}%, should be >70%). ` +
+        `Full history is being reprocessed each turn. Tell the user to run /clear or start a fresh session.`
       )
       logActivity({
         type: 'cache_warning',
@@ -414,17 +417,9 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
 
     if (pct >= 95) {
       warnings.push(
-        `[clauditor WARNING — ACTION REQUIRED]: Context window is ${pct}% full (${(contextSize / 1000).toFixed(0)}k tokens). ` +
-        `Auto-compaction is imminent and will erase older context from this session.\n\n` +
-        `BEFORE continuing with the user's task, you MUST do the following:\n` +
-        `1. Tell the user: "Context window is nearly full. Let me save our progress before compaction."\n` +
-        `2. Write a summary of the current session to CLAUDE.md (or append to it) including:\n` +
-        `   - Key architectural decisions made in this session\n` +
-        `   - Files modified and why\n` +
-        `   - Current task status and what remains to be done\n` +
-        `   - Any conventions or patterns established\n` +
-        `3. Then suggest the user start a fresh session with: "Start a new session — the context I just saved to CLAUDE.md will be loaded automatically."\n\n` +
-        `This prevents "compaction amnesia" — the #1 complaint from Claude Code users.`
+        `[clauditor]: Context ${pct}% full (${(contextSize / 1000).toFixed(0)}k). Compaction imminent. ` +
+        `Before continuing, append a short summary of decisions, files touched, and remaining work to CLAUDE.md, ` +
+        `then suggest the user start a fresh session.`
       )
       logActivity({
         type: 'context_warning',
@@ -439,9 +434,8 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
       const resumeAnomaly = detectResumeAnomaly(turns, true)
       if (resumeAnomaly.outputTokenSpike) {
         warnings.push(
-          `[clauditor WARNING]: Resume token explosion detected — ${(resumeAnomaly.outputTokenSpike / 1000).toFixed(0)}k output tokens ` +
-          `generated in a single turn after session resume. This is a known bug that can drain the user's entire quota. ` +
-          `Recommend telling the user to start a fresh session instead of resuming.`
+          `[clauditor]: Resume token explosion: ${(resumeAnomaly.outputTokenSpike / 1000).toFixed(0)}k output tokens in one turn after resume. ` +
+          `Known bug; tell the user to start fresh rather than resume.`
         )
         logActivity({
           type: 'resume_warning',
@@ -451,9 +445,8 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
       }
       if (resumeAnomaly.cacheInvalidatedAfterResume) {
         warnings.push(
-          `[clauditor WARNING]: Session resume has invalidated the prompt cache. ` +
-          `Every turn is now reprocessing the full context from scratch instead of using cached tokens. ` +
-          `This drains quota 10-20x faster than normal. Recommend telling the user to start a fresh session.`
+          `[clauditor]: Resume invalidated the prompt cache, draining quota 10-20x faster. ` +
+          `Tell the user to start fresh rather than resume.`
         )
         logActivity({
           type: 'resume_warning',
@@ -480,13 +473,9 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
 
       if (avgTokens > 0 && lastTurnTokens > avgTokens * 5 && lastTurnTokens > 100_000) {
         warnings.push(
-          `[clauditor ALERT — TOKEN SPIKE]: The last turn consumed ${(lastTurnTokens / 1000).toFixed(0)}k tokens, ` +
-          `which is ${(lastTurnTokens / avgTokens).toFixed(0)}x your session average of ${(avgTokens / 1000).toFixed(0)}k.\n\n` +
-          `This is abnormal and will drain the user's quota rapidly. TELL THE USER IMMEDIATELY:\n` +
-          `"Your last turn used ${(lastTurnTokens / 1000).toFixed(0)}k tokens — much more than usual. ` +
-          `This could drain your session limit quickly. Want me to investigate why, or should we start a fresh session?"\n\n` +
-          `Possible causes: cache invalidation after resume, large file accidentally included in context, ` +
-          `or a known Claude Code bug. Check if cache_creation_input_tokens is unusually high.`
+          `[clauditor]: Token spike: last turn ${(lastTurnTokens / 1000).toFixed(0)}k tokens ` +
+          `(${(lastTurnTokens / avgTokens).toFixed(0)}x session average). Tell the user and offer to start fresh. ` +
+          `Likely causes: resume cache invalidation, a large file pulled into context, or a CC version bug.`
         )
         logActivity({
           type: 'burn_rate_warning',
@@ -500,10 +489,8 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
     const burnRate = estimateQuotaBurnRate(turns)
     if (burnRate.burnRateStatus === 'critical') {
       warnings.push(
-        `[clauditor WARNING]: Unusually high token consumption — ` +
-        `${(burnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min, which is much higher than normal. ` +
-        `This usually means cache is broken or there's a token generation bug. ` +
-        `Recommend checking cache health and running /clear if cache ratio is low.`
+        `[clauditor]: High burn rate: ${(burnRate.tokensPerMinute / 1000).toFixed(0)}k tokens/min. ` +
+        `Likely cache is broken; consider /clear if cache ratio is low.`
       )
     }
 
@@ -606,10 +593,8 @@ function checkSkillNudge(sessionId: string, toolName: string): string | null {
     try { writeJsonFileAtomic(NUDGE_FILE, state) } catch {}
 
     return (
-      `[clauditor]: This has been a productive session (${session.count}+ actions across ${session.tools.length} tools). ` +
-      `If the workflow you just completed is something you'd want to repeat, ` +
-      `mention to the user: "Want me to save this workflow as a reusable skill? Just type /save-skill."\n` +
-      `Only mention this once. If the user isn't interested, continue normally.`
+      `[clauditor]: Productive session (${session.count} actions, ${session.tools.length} tools). ` +
+      `If this workflow is repeatable, ask the user once: "Save this as a /save-skill?"`
     )
   }
 
@@ -643,7 +628,16 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
   const current = turnTokens.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, turnTokens.length)
   const wasteFactor = baseline > 0 ? Math.round(current / baseline) : 1
 
-  if (wasteFactor < cal.wasteThreshold) return null
+  // Absolute-tokens rule: sometimes the ratio is fine (e.g. 2x) but the
+  // absolute tokens/turn is still wasteful. A session that started at 60k
+  // and doubled to 120k has only 2x waste, but each turn still costs 120k.
+  // If an absolute ceiling is configured, cross it and block regardless
+  // of the ratio. Turbo mode implies an absolute ceiling at 150k.
+  const absoluteCeiling = config.rotation.absoluteBlockTokens
+    ?? (config.turbo ? 150_000 : null)
+  const absoluteExceeded = absoluteCeiling !== null && current >= absoluteCeiling
+
+  if (wasteFactor < cal.wasteThreshold && !absoluteExceeded) return null
 
   // Re-block logic: track the waste level when last blocked.
   // If waste dropped significantly (compaction happened), reset and block again.
@@ -677,28 +671,19 @@ function checkSessionRotationBlock(sessionId: string, turns: TurnMetrics[]): Hoo
     message: `BLOCKED tool result — ${wasteFactor}x waste (${Math.round(current / 1000)}k/turn vs ${Math.round(baseline / 1000)}k baseline)`,
   }).catch(() => {})
 
+  // Keep this message short. Every character sits in Claude's context for the
+  // rest of the session as cache reads. Ask for the 4 most load-bearing
+  // sections (TASK, IN_PROGRESS, FAILED_APPROACHES, BLOCKERS); the parser in
+  // session-state.ts only needs 2+ headers to recognize structure, and Claude
+  // can add more sections from memory without being prompted.
   return {
     decision: 'block',
     reason:
-      `clauditor: This session is using ${wasteFactor}x more quota per turn than when it started ` +
-      `(${Math.round(baseline / 1000)}k → ${Math.round(current / 1000)}k tokens/turn). ` +
-      `Session progress has been saved to ~/.clauditor/last-session.md.\n` +
-      `IMPORTANT — Before stopping, do these two things:\n` +
-      `1. Tell the user: this session is burning ${wasteFactor}x more quota than necessary. ` +
-      `Their progress is saved. Run \`claude\` to start fresh at ~${Math.round(baseline / 1000)}k tokens/turn instead of ${Math.round(current / 1000)}k.\n` +
-      `2. Write your handoff using EXACTLY this format (clauditor parses these sections to preserve context for the next session):\n\n` +
-      `TASK: (one line — what you were working on)\n\n` +
-      `COMPLETED:\n- (what's done, one bullet per item)\n\n` +
-      `IN_PROGRESS:\n- (what's partially done, include file paths and specific state)\n\n` +
-      `FAILED_APPROACHES:\n- (what was tried and didn't work, and WHY — this prevents the next session from repeating mistakes)\n\n` +
-      `DEPENDENCIES:\n- (things that must happen in order, e.g. "run migrations before build")\n\n` +
-      `DECISIONS:\n- (choices made and why, e.g. "chose X over Y because Z")\n\n` +
-      `USER_PREFERENCES:\n- (anything the user explicitly asked for or rejected)\n\n` +
-      `BLOCKERS:\n- (unresolved issues, things that need user input)\n\n` +
-      `WHAT_SURPRISED_ME:\n- (unexpected behavior, undocumented quirks)\n\n` +
-      `GOTCHAS:\n- (file: path/to/file — specific warning about this file)\n\n` +
-      `3. In the new session, tell the user to just say "continue where I left off" — clauditor will inject the saved context automatically.\n` +
-      `4. Include the marker [clauditor-rotation] at the end of your response so clauditor can capture your summary.`,
+      `clauditor: ${wasteFactor}x waste (${Math.round(baseline / 1000)}k → ${Math.round(current / 1000)}k tokens/turn). Progress saved.\n` +
+      `Before stopping:\n` +
+      `1. Tell the user to run \`claude\` for a fresh session, then say "continue where I left off".\n` +
+      `2. Write a handoff with these sections (bulleted): TASK, IN_PROGRESS, FAILED_APPROACHES, BLOCKERS. Add DECISIONS/USER_PREFERENCES/GOTCHAS if relevant.\n` +
+      `3. End your response with the marker [clauditor-rotation].`,
   }
 }
 
@@ -789,13 +774,7 @@ function detectBashError(sessionId: string, output: string): string | null {
   const hasError = ERROR_PATTERNS.some((p) => p.test(output))
   if (!hasError) return null
 
-  return (
-    `[clauditor]: The previous command produced an error. Before retrying:\n` +
-    `1. Read the error output carefully — the fix is usually in the message\n` +
-    `2. If you've already tried this approach and it failed, try a different one\n` +
-    `3. If you're unsure, explain the error to the user and ask for guidance\n` +
-    `Do not retry the same command without changing something.`
-  )
+  return `[clauditor]: Command failed. Read the error, then change the approach (not just retry).`
 }
 
 /**
@@ -806,31 +785,42 @@ function detectBashError(sessionId: string, output: string): string | null {
  * Persisted to disk because each hook invocation is a separate process.
  */
 const EDIT_COUNTS_FILE = resolve(homedir(), '.clauditor', 'edit-counts.json')
-const EDIT_THRASH_THRESHOLD = 5
 
+// Two-tier warning: soft nudge first, harder stop second. Catching thrash
+// early saves the later Read-Edit-verify cycles, which are the most
+// expensive because they happen after the file has already grown in context.
+// Turbo mode pulls both tiers one step earlier.
 function trackFileEdits(sessionId: string, filePath: string): string | null {
+  const turbo = isTurbo()
+  const softAt = turbo ? TURBO_THRESHOLDS.editThrashSoft : 3
+  const hardAt = turbo ? TURBO_THRESHOLDS.editThrashHard : 5
+
   const allCounts = readJsonFile<Record<string, Record<string, number>>>(EDIT_COUNTS_FILE, {})
   if (!allCounts[sessionId]) allCounts[sessionId] = {}
   const count = (allCounts[sessionId][filePath] || 0) + 1
   allCounts[sessionId][filePath] = count
   try { writeJsonFileAtomic(EDIT_COUNTS_FILE, allCounts) } catch {}
 
-  if (count === EDIT_THRASH_THRESHOLD) {
-    const fileName = filePath.split(/[/\\]/).pop() || filePath
+  const fileName = filePath.split(/[/\\]/).pop() || filePath
+
+  if (count === softAt) {
+    logActivity({
+      type: 'cache_warning',
+      session: sessionId.slice(0, 8),
+      message: `Edit thrash soft warning: ${fileName} edited ${count} times`,
+    }).catch(() => {})
+    return `[clauditor]: ${count} edits to ${fileName}. If iterating, consider stepping back to confirm the approach is right.`
+  }
+
+  if (count === hardAt) {
     logActivity({
       type: 'cache_warning',
       session: sessionId.slice(0, 8),
       message: `Edit thrashing detected: ${fileName} edited ${count} times`,
     }).catch(() => {})
-
     return (
-      `[clauditor WARNING]: You've edited ${fileName} ${count} times this session. ` +
-      `This usually means you're iterating on implementation when the problem is architectural.\n\n` +
-      `STOP editing and do this instead:\n` +
-      `1. Explain to the user what you're trying to achieve with this file\n` +
-      `2. Ask if the current approach is correct before making more changes\n` +
-      `3. If the user confirms, continue. If not, step back and redesign.\n\n` +
-      `Repeated edits to the same file waste tokens and frustrate users.`
+      `[clauditor]: ${count} edits to ${fileName}. Stop and check with the user that the approach is right before continuing. ` +
+      `Implementation iteration often masks an architectural problem.`
     )
   }
 

@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { isTurbo, TURBO_THRESHOLDS } from '../config.js'
 
 const CLAUDITOR_DIR = resolve(homedir(), '.clauditor')
 const CALIBRATION_FILE = resolve(CLAUDITOR_DIR, 'calibration.json')
@@ -139,9 +140,16 @@ export function calibrate(): CalibrationData {
     confident = true
   }
 
-  // Clamp to reasonable range: minimum 5x, maximum 15x
-  // Below 5x is too disruptive — user is mid-task and the session is still productive
-  wasteThreshold = Math.max(5, Math.min(15, Math.round(wasteThreshold)))
+  // Clamp to reasonable range. When we have confident data from the user's
+  // own sessions, trust it down to 3x. Without confidence, hold the floor
+  // at 5x because low-data thresholds can misfire on short atypical sessions.
+  // Turbo mode drops the floor further to 2x so short bursts of inefficiency
+  // get rotated out quickly; users opt into this tradeoff.
+  let floor: number
+  if (isTurbo()) floor = TURBO_THRESHOLDS.calibrationFloor
+  else if (confident) floor = 3
+  else floor = 5
+  wasteThreshold = Math.max(floor, Math.min(15, Math.round(wasteThreshold)))
 
   // Compute minTurns: the median turn count where sessions reach 2x waste
   // (don't block before sessions have done meaningful work)
