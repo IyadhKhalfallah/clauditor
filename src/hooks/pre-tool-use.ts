@@ -3,7 +3,9 @@ import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import type { PreToolUseHookInput, HookDecision } from '../types.js'
 import { readStdin, outputDecision } from './shared.js'
-import { findKnownError } from '../features/error-index.js'
+import { findKnownError, effectiveConfidence } from '../features/error-index.js'
+import { fingerprintCall, checkAndRecord } from '../features/tool-call-dedup.js'
+import { getCached, setCached } from '../hub/query-cache.js'
 
 // Rate limit: only inject once per unique base command per session.
 function rateLimitFile(): string {
@@ -83,17 +85,36 @@ export async function handlePreToolUseHook(): Promise<void> {
 }
 
 async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecision> {
-  // Only check Bash commands
-  if (input.tool_name !== 'Bash') return {}
+  const parts: string[] = []
+
+  // 0. Within-session tool-call dedup. Fires for Read/Grep/Glob because
+  // those are the tools most likely to be re-invoked with identical input
+  // in a long session. For Read the fingerprint includes mtime, so a file
+  // edited between calls is never treated as duplicate.
+  if (input.tool_name === 'Read' || input.tool_name === 'Grep' || input.tool_name === 'Glob') {
+    const fp = fingerprintCall(input.tool_name, (input.tool_input || {}) as Record<string, unknown>)
+    if (fp) {
+      const hint = checkAndRecord(input.session_id, input.tool_name, fp.fingerprint, fp.label)
+      if (hint) parts.push(hint)
+    }
+  }
+
+  // Only the rest of this hook runs on Bash
+  if (input.tool_name !== 'Bash') {
+    if (parts.length === 0) return {}
+    return { additionalContext: parts.join('\n\n') }
+  }
 
   const command = input.tool_input?.command as string
-  if (!command) return {}
-
-  const parts: string[] = []
+  if (!command) {
+    if (parts.length === 0) return {}
+    return { additionalContext: parts.join('\n\n') }
+  }
 
   // 1. Local error index check (free, offline, instant)
   let injectedWarning = false
   const baseCommand = command.split(/\s+/).slice(0, 2).join(' ')
+  let localHadConfirmedFix = false
 
   if (input.cwd) {
     const key = `${input.session_id}:${baseCommand}`
@@ -103,6 +124,12 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
       if (knownError) {
         markInjected(key)
         injectedWarning = true
+        // If the local entry is "confirmed" (effective confidence >= 0.7)
+        // and has a fix, the hub is extremely unlikely to tell us anything
+        // more useful. Skip the hub round-trip and its injection tokens.
+        const eff = effectiveConfidence(knownError.confidence, knownError.lastSeen)
+        if (eff >= 0.7 && knownError.fix) localHadConfirmedFix = true
+
         let context = `[clauditor]: \`${knownError.command.slice(0, 60)}\` has failed ${knownError.occurrences} times on this project.\n`
         context += `Last error: ${knownError.error.slice(0, 150)}`
         if (knownError.fix) {
@@ -113,10 +140,11 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
     }
   }
 
-  // 2. Hub contextual query (team-wide knowledge, if configured)
+  // 2. Hub contextual query (team-wide knowledge, if configured).
+  // Short-circuit when local already produced a confirmed fix.
   let hubEntryIds: string[] = []
 
-  if (input.cwd) {
+  if (input.cwd && !localHadConfirmedFix) {
     const hubKey = `hub:${input.session_id}:${baseCommand}`
     const injected = readInjected()
     if (!injected[hubKey]) {
@@ -124,8 +152,16 @@ async function processPreToolUse(input: PreToolUseHookInput): Promise<HookDecisi
         const { resolveHubContext, queryKnowledge } = await import('../hub/client.js')
         const hub = resolveHubContext(input.cwd)
         if (hub) {
-          const result = await queryKnowledge(hub.projectHash, 'command', command, hub.config)
-          if (result.entries.length > 0) {
+          // Consult the 10-minute local cache before hitting the hub.
+          type QueryResult = Awaited<ReturnType<typeof queryKnowledge>>
+          let result: QueryResult | null = getCached<QueryResult>(
+            hub.projectHash, 'command', command
+          )
+          if (!result) {
+            result = await queryKnowledge(hub.projectHash, 'command', command, hub.config)
+            if (result) setCached(hub.projectHash, 'command', command, result)
+          }
+          if (result && result.entries.length > 0) {
             markInjected(hubKey)
             injectedWarning = true
             hubEntryIds = result.entries.map((e) => e.id)

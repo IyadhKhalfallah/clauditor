@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
+import { isTurbo, TURBO_THRESHOLDS } from '../config.js'
 
 function clauditorDir(): string {
   return resolve(homedir(), '.clauditor')
@@ -136,22 +137,60 @@ export function recordFileRead(cwd: string, filePath: string, sessionId: string)
 }
 
 /**
- * Get context for a file if it's a "hot" file (5+ edits, 3+ sessions).
- * Returns a brief context string for PostToolUse injection.
+ * Track which (session, file) pairs have already received a hot-file
+ * injection, so we inject once per session per file rather than on
+ * every Read. Cheap on disk, saves tokens in context.
  */
-export function getFileContext(cwd: string, filePath: string): string | null {
+function getInjectedPath(cwd: string): string {
+  return resolve(getKnowledgeDir(cwd), 'hotfile-injected.json')
+}
+
+function readInjected(cwd: string): Record<string, boolean> {
+  try {
+    return JSON.parse(readFileSync(getInjectedPath(cwd), 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function markInjected(cwd: string, sessionId: string, key: string): void {
+  const data = readInjected(cwd)
+  data[`${sessionId}:${key}`] = true
+  const dir = getKnowledgeDir(cwd)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(getInjectedPath(cwd), JSON.stringify(data))
+}
+
+/**
+ * Get context for a file if it's a "hot" file (5+ edits, 3+ sessions).
+ * Returns a brief context string for PostToolUse injection, but only
+ * the first time this file comes up in a given session. Repeating the
+ * same reminder on every Read wastes cache tokens.
+ */
+export function getFileContext(cwd: string, filePath: string, sessionId?: string): string | null {
   const index = readFileIndex(cwd)
   const key = fileKey(filePath)
   const entry = index[key]
 
   if (!entry) return null
-  if (entry.editCount < 5 || entry.sessions < 3) return null
+  // Turbo mode flags hot files sooner (3 edits / 2 sessions) so the
+  // "review carefully" nudge fires on files that are building momentum
+  // rather than waiting for them to be deeply entrenched.
+  const minEdits = isTurbo() ? TURBO_THRESHOLDS.hotFileEditCount : 5
+  const minSessions = isTurbo() ? TURBO_THRESHOLDS.hotFileSessionCount : 3
+  if (entry.editCount < minEdits || entry.sessions < minSessions) return null
+
+  if (sessionId) {
+    const injected = readInjected(cwd)
+    if (injected[`${sessionId}:${key}`]) return null
+    markInjected(cwd, sessionId, key)
+  }
 
   const displayName = key.split('/').pop() || key
   return (
-    `[clauditor]: ${displayName} — ${entry.editCount} edits across ${entry.sessions} sessions` +
+    `[clauditor]: ${displayName}: ${entry.editCount} edits across ${entry.sessions} sessions` +
     (entry.lastEdited ? `, last edited ${entry.lastEdited}` : '') +
-    `. This is a frequently modified file — review changes carefully.`
+    `. Frequently modified; review changes carefully.`
   )
 }
 

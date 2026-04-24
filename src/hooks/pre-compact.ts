@@ -3,12 +3,17 @@ import { saveSessionState, extractSessionStateFromTranscript } from '../features
 import { readStdin, outputDecision, findTranscriptPathSync } from './shared.js'
 
 /**
- * PreCompact hook — fires right before Claude Code compacts the context.
+ * PreCompact hook: fires right before Claude Code compacts the context.
  *
- * This is the PERFECT moment to save session state:
- * - Compaction is about to erase older context
- * - We save to ~/.clauditor/last-session.md (not CLAUDE.md)
- * - The SessionStart hook injects this into the next session
+ * Two jobs:
+ * 1. Save mechanical session state as a fallback before compaction runs.
+ *    If PostCompact fires we'll replace this with Claude's own summary;
+ *    if it doesn't, we still have something.
+ * 2. Nudge Claude to produce a tighter summary than its default. Old
+ *    tool_results (Reads, Bash output) from the first half of the session
+ *    are usually stale; telling Claude to collapse them to one-line
+ *    entries reduces the size of the compact_summary without losing the
+ *    load-bearing context.
  */
 export async function handlePreCompactHook(): Promise<void> {
   const input = await readStdin()
@@ -21,6 +26,7 @@ export async function handlePreCompactHook(): Promise<void> {
     return
   }
 
+  let turnCount = 0
   try {
     const sessionId = hookInput.session_id
     const transcriptPath = hookInput.transcript_path || findTranscriptPathSync(sessionId)
@@ -31,6 +37,7 @@ export async function handlePreCompactHook(): Promise<void> {
 
     const stateData = extractSessionStateFromTranscript(sessionId, transcriptPath)
     if (stateData) {
+      turnCount = stateData.turns
       saveSessionState(stateData)
       logActivity({
         type: 'context_warning',
@@ -42,7 +49,22 @@ export async function handlePreCompactHook(): Promise<void> {
     // Non-critical
   }
 
-  outputDecision({})
+  // Inject a compaction-shaping instruction. Compaction is one of the most
+  // expensive single operations in a Claude Code session because the model
+  // regenerates a long summary from the full history. Asking for a tight,
+  // structured summary up front reduces the output tokens it produces and
+  // the cache_creation tokens on the turn after compaction.
+  const earlierHalf = turnCount > 0 ? Math.max(1, Math.floor(turnCount / 2)) : null
+  const earlierHint = earlierHalf
+    ? `Turns 1 through ${earlierHalf} are old; collapse their tool_results to one-line entries. `
+    : `Older tool_results are likely stale; collapse them to one-line entries. `
+
+  outputDecision({
+    additionalContext:
+      `[clauditor]: Compaction is about to run. Keep the summary tight: ` +
+      earlierHint +
+      `Preserve files modified, decisions made, and blockers; drop raw file contents and verbose logs.`,
+  })
 }
 
 handlePreCompactHook().catch((err) => {

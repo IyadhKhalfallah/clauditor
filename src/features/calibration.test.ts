@@ -230,12 +230,13 @@ describe('calibrate', () => {
 
     expect(result.sessionsAnalyzed).toBe(6)
     expect(result.confident).toBe(true)
-    // Threshold should be clamped between 5 and 15
-    expect(result.wasteThreshold).toBeGreaterThanOrEqual(5)
+    // When confident, floor drops to 3 (user's own data justifies tighter rotation).
+    // Without confidence it stays at 5.
+    expect(result.wasteThreshold).toBeGreaterThanOrEqual(3)
     expect(result.wasteThreshold).toBeLessThanOrEqual(15)
   })
 
-  it('clamps threshold to 5-15 range', async () => {
+  it('clamps threshold to calibrated range', async () => {
     const projDir = setupProjectDir(tempDir, 'test-project')
 
     // Create sessions with very low waste factor break-even (e.g., 1.5x)
@@ -252,8 +253,9 @@ describe('calibrate', () => {
     const mod = await importFresh(tempDir)
     const result = mod.calibrate()
 
-    // If break-even wastes are found, threshold is clamped to at least 5
-    expect(result.wasteThreshold).toBeGreaterThanOrEqual(5)
+    // Floor is 3 when confident, 5 when not
+    const floor = result.confident ? 3 : 5
+    expect(result.wasteThreshold).toBeGreaterThanOrEqual(floor)
     expect(result.wasteThreshold).toBeLessThanOrEqual(15)
   })
 
@@ -334,7 +336,8 @@ describe('calibrate', () => {
     const calPath = join(tempDir, '.clauditor', 'calibration.json')
     const saved = JSON.parse(readFileSync(calPath, 'utf-8'))
     expect(saved.sessionsAnalyzed).toBe(4)
-    expect(saved.wasteThreshold).toBeGreaterThanOrEqual(5)
+    const floor = saved.confident ? 3 : 5
+    expect(saved.wasteThreshold).toBeGreaterThanOrEqual(floor)
   })
 
   it('computes waste factor correctly (final / baseline)', async () => {

@@ -1,4 +1,5 @@
 import type { BashFilterConfig } from '../types.js'
+import { isTurbo, TURBO_THRESHOLDS } from '../config.js'
 
 export interface CompressionResult {
   compressed: boolean
@@ -8,7 +9,7 @@ export interface CompressionResult {
   compressedLength: number
 }
 
-const DEFAULT_PRESERVE = ['error', 'warn', 'fail', 'exception', '✗']
+const DEFAULT_PRESERVE = ['error', 'warn', 'fail', 'exception', '✗', 'panic', 'fatal', 'assertionerror', '--- fail', 'traceback']
 const DEFAULT_NOISE = ['npm warn', 'added \\d+ packages', '\\[=+']
 
 /**
@@ -26,12 +27,17 @@ export function compressBashOutput(
   output: string,
   config?: Partial<BashFilterConfig>
 ): CompressionResult {
-  const maxChars = config?.maxOutputChars ?? 2000
+  // Turbo mode tightens both the trigger threshold and the cap so more
+  // bash output goes through compression and what comes out is smaller.
+  const turbo = isTurbo()
+  const defaultMax = turbo ? TURBO_THRESHOLDS.bashCompressMaxChars : 1200
+  const defaultTrigger = turbo ? TURBO_THRESHOLDS.bashCompressTriggerChars : 300
+  const maxChars = config?.maxOutputChars ?? defaultMax
   const preservePatterns = (config?.preservePatterns ?? DEFAULT_PRESERVE).map(
     (p) => new RegExp(p, 'i')
   )
 
-  if (output.length < 500) {
+  if (output.length < defaultTrigger) {
     return {
       compressed: false,
       original: output,
