@@ -56,9 +56,12 @@ async function buildSessionStartContext(
       )
     }
 
-    // Inject session handoff(s) if available
+    // Inject session handoff(s) if available. Prefer handoffs from the current
+    // project so resume is project-scoped (no cross-project chooser noise);
+    // only widen to a cross-project scan when this project has none yet.
     const { readRecentHandoffs, extractHandoffDescription } = await import('../features/session-state.js')
-    const handoffs = readRecentHandoffs()
+    let handoffs = readRecentHandoffs(cwd)
+    if (handoffs.length === 0) handoffs = readRecentHandoffs()
 
     // Helper: short project label for cross-project sessions
     const projectLabel = (h: { project: string | null }): string => {

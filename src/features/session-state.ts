@@ -4,8 +4,17 @@ import { resolve, basename } from 'node:path'
 
 const CLAUDITOR_DIR = resolve(homedir(), '.clauditor')
 const SESSIONS_DIR = resolve(CLAUDITOR_DIR, 'sessions')
-// Keep legacy path for backward compat reads
+// Keep legacy path for backward compat reads. This single file is
+// last-write-wins: any project's save overwrites it, so it cannot be trusted
+// to point at the current project's handoff. It is retained as a final
+// fallback for old installs (see readRecentHandoffs) but the per-project
+// index below is the source of truth.
 const LEGACY_SESSION_FILE = resolve(CLAUDITOR_DIR, 'last-session.md')
+
+// Per-project index of each project's latest handoff. Unlike the legacy
+// pointer, this is a map keyed by project cwd, so concurrent sessions in
+// different projects never clobber each other's pointer.
+const SESSION_INDEX_FILE = resolve(CLAUDITOR_DIR, 'last-session.json')
 
 const MAX_HANDOFF_AGE_MS = 24 * 60 * 60 * 1000 // 24 hours
 
@@ -44,6 +53,99 @@ function encodeCwd(cwd: string): string {
 function getSessionsDir(cwd: string | null): string {
   if (!cwd) return SESSIONS_DIR
   return resolve(SESSIONS_DIR, encodeCwd(cwd))
+}
+
+interface SessionIndexEntry {
+  /** Absolute path to this project's latest handoff .md */
+  path: string
+  /** ISO timestamp of the save */
+  savedAt: string
+  /** Epoch ms of the save (for recency + cutoff comparisons) */
+  timestamp: number
+  /** Whether the latest handoff is a Claude PostCompact summary */
+  isPostCompact: boolean
+}
+
+type SessionIndex = Record<string, SessionIndexEntry>
+
+/** Read the per-project handoff index. Returns {} on any error. */
+function readSessionIndex(): SessionIndex {
+  try {
+    const parsed = JSON.parse(readFileSync(SESSION_INDEX_FILE, 'utf-8'))
+    return parsed && typeof parsed === 'object' ? (parsed as SessionIndex) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Record a project's latest handoff in the index, keyed by cwd so a save for
+ * one project never clobbers another's entry. Stale entries (older than the
+ * handoff retention window) are pruned so the file stays bounded.
+ */
+function updateSessionIndex(cwd: string | null, handoffPath: string, isPostCompact: boolean): void {
+  if (!cwd) return
+  try {
+    const index = readSessionIndex()
+    const cutoff = Date.now() - MAX_HANDOFF_AGE_MS
+    for (const key of Object.keys(index)) {
+      if ((index[key]?.timestamp ?? 0) < cutoff) delete index[key]
+    }
+    index[cwd] = {
+      path: handoffPath,
+      savedAt: new Date().toISOString(),
+      timestamp: Date.now(),
+      isPostCompact,
+    }
+    writeFileSync(SESSION_INDEX_FILE, JSON.stringify(index, null, 2))
+  } catch (err) {
+    process.stderr.write(`clauditor: failed to update session index: ${err}\n`)
+  }
+}
+
+/**
+ * Resolve a handoff from the per-project index.
+ * - With a cwd: that project's latest handoff (exact match, else the nearest
+ *   ancestor/descendant project — handles monorepo parent/subdir cases).
+ * - Without a cwd: the single most-recently-saved handoff across all projects.
+ * Returns null if the index has no usable entry or its file is gone/stale.
+ */
+function readHandoffFromIndex(cwd: string | null | undefined, cutoff: number): HandoffFile | null {
+  const index = readSessionIndex()
+  const keys = Object.keys(index)
+  if (keys.length === 0) return null
+
+  let key: string | null = null
+  if (cwd) {
+    if (index[cwd]) {
+      key = cwd
+    } else {
+      const related = keys
+        .filter((k) => cwd.startsWith(k + '/') || k.startsWith(cwd + '/'))
+        .sort((a, b) => b.length - a.length)
+      key = related[0] ?? null
+    }
+  } else {
+    key = keys.sort((a, b) => (index[b]?.timestamp ?? 0) - (index[a]?.timestamp ?? 0))[0] ?? null
+  }
+
+  if (!key) return null
+  const entry = index[key]
+  if (!entry || entry.timestamp < cutoff) return null
+
+  try {
+    const content = readFileSync(entry.path, 'utf-8')
+    const projectMatch = content.match(/\*\*Project:\*\*\s*(.+)/)
+    return {
+      path: entry.path,
+      content,
+      timestamp: entry.timestamp,
+      isPostCompact: entry.isPostCompact || content.includes('PostCompact'),
+      project: projectMatch ? projectMatch[1].trim() : key,
+    }
+  } catch {
+    return null // indexed file was cleaned up or moved
+  }
 }
 
 /**
@@ -111,6 +213,9 @@ export function saveSessionState(data: SessionStateData): void {
 
     // Also write to legacy path for backward compat
     writeFileSync(LEGACY_SESSION_FILE, sections.join('\n'))
+
+    // Record in the per-project index (keyed by cwd, never clobbers others)
+    updateSessionIndex(data.cwd, filePath, false)
   } catch (err) {
     process.stderr.write(`clauditor: failed to save session state: ${err}\n`)
   }
@@ -244,8 +349,12 @@ export async function savePostCompactSummary(
 
     const finalContent = sections.join('\n')
     const timestamp = Date.now()
-    writeFileSync(resolve(dir, `${timestamp}.md`), finalContent)
+    const filePath = resolve(dir, `${timestamp}.md`)
+    writeFileSync(filePath, finalContent)
     writeFileSync(LEGACY_SESSION_FILE, finalContent)
+
+    // Record in the per-project index (keyed by cwd, never clobbers others)
+    updateSessionIndex(cwd, filePath, true)
   } catch (err) {
     process.stderr.write(`clauditor: failed to save PostCompact summary: ${err}\n`)
   }
@@ -385,21 +494,42 @@ export function readRecentHandoffs(cwd?: string | null): HandoffFile[] {
     } catch {}
   }
 
-  // Fallback: check legacy file if nothing found
+  // Fallback: nothing in the per-project session dirs. Prefer the per-project
+  // index (project-correct), then fall back to the single legacy pointer.
   if (results.length === 0) {
-    try {
-      const st = statSync(LEGACY_SESSION_FILE)
-      if (st.mtimeMs >= cutoff) {
-        const content = readFileSync(LEGACY_SESSION_FILE, 'utf-8')
-        results.push({
-          path: LEGACY_SESSION_FILE,
-          content,
-          timestamp: st.mtimeMs,
-          isPostCompact: content.includes('PostCompact'),
-          project: null,
-        })
-      }
-    } catch {}
+    const fromIndex = readHandoffFromIndex(cwd, cutoff)
+    if (fromIndex) {
+      results.push(fromIndex)
+    } else {
+      try {
+        const st = statSync(LEGACY_SESSION_FILE)
+        if (st.mtimeMs >= cutoff) {
+          const content = readFileSync(LEGACY_SESSION_FILE, 'utf-8')
+          const projectMatch = content.match(/\*\*Project:\*\*\s*(.+)/)
+          const legacyProject = projectMatch ? projectMatch[1].trim() : null
+          // The legacy pointer is last-write-wins, so only surface it when it
+          // isn't known to belong to a *different* project than the one being
+          // resolved — this stops project A's handoff from leaking into a
+          // resume of project B. Unknown-project legacy files (pre-index
+          // installs) are still surfaced as a last resort.
+          const belongs =
+            !cwd ||
+            !legacyProject ||
+            legacyProject === cwd ||
+            cwd.startsWith(legacyProject + '/') ||
+            legacyProject.startsWith(cwd + '/')
+          if (belongs) {
+            results.push({
+              path: LEGACY_SESSION_FILE,
+              content,
+              timestamp: st.mtimeMs,
+              isPostCompact: content.includes('PostCompact'),
+              project: legacyProject,
+            })
+          }
+        }
+      } catch {}
+    }
   }
 
   return results.sort((a, b) => b.timestamp - a.timestamp)
