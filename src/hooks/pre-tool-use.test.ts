@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
+import { readOutcomePending, clearOutcomePending } from '../features/outcome-pending.js'
 
 let tempDir: string
 let origHome: string
