@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
 import { recordError, recordFix, recordOutcome, extractBaseCommand, trackCommand, clearCommandBuffer } from '../features/error-index.js'
-import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
+import { readOutcomePending, clearOutcomePending } from '../features/outcome-pending.js'
 import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
@@ -842,7 +842,15 @@ function formatSize(chars: number): string {
   return `${(chars / 1000).toFixed(1)}k chars`
 }
 
-// Run if invoked directly
+// Run if invoked directly.
+//
+// NOTE: this fires as a side effect of *importing* this module, not just
+// running it as a script — the CLI dispatches hooks via
+// `await import('./hooks/post-tool-use.js')`, and other modules importing
+// anything from this file (even a single named export) will trigger it too.
+// Never import from another hooks/*.ts file for its utility exports — put
+// shared, side-effect-free helpers in src/features/ instead (see
+// src/features/outcome-pending.ts).
 handlePostToolUseHook().catch((err) => {
   process.stderr.write(`clauditor post-tool-use hook error: ${err}\n`)
   process.stdout.write('{}')
