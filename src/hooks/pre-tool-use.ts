@@ -4,23 +4,11 @@ import { resolve } from 'node:path'
 import type { PreToolUseHookInput, HookDecision } from '../types.js'
 import { readStdin, outputDecision } from './shared.js'
 import { findKnownError } from '../features/error-index.js'
+import { setOutcomePending } from '../features/outcome-pending.js'
 
 // Rate limit: only inject once per unique base command per session.
 function rateLimitFile(): string {
   return resolve(homedir(), '.clauditor', 'pretool-injected.json')
-}
-
-// Outcome tracking: when PreToolUse injects a warning, record it so
-// PostToolUse can check if the command succeeded/failed and adjust confidence.
-function outcomeStateFile(): string {
-  return resolve(homedir(), '.clauditor', 'pretool-outcome-pending.json')
-}
-
-export interface OutcomePending {
-  command: string
-  baseCommand: string
-  timestamp: number
-  hubEntryIds?: string[]
 }
 
 function readInjected(): Record<string, boolean> {
@@ -34,31 +22,6 @@ function markInjected(key: string): void {
     mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
     writeFileSync(rateLimitFile(), JSON.stringify(data))
   } catch {}
-}
-
-/** Write outcome-pending state so PostToolUse can track the result. */
-function setOutcomePending(pending: OutcomePending): void {
-  try {
-    mkdirSync(resolve(homedir(), '.clauditor'), { recursive: true })
-    writeFileSync(outcomeStateFile(), JSON.stringify(pending))
-  } catch {}
-}
-
-export function readOutcomePending(): OutcomePending | null {
-  try {
-    const data = JSON.parse(readFileSync(outcomeStateFile(), 'utf-8'))
-    // Must have required fields
-    if (!data.command || !data.timestamp) return null
-    // Expire after 5 minutes
-    if (Date.now() - data.timestamp > 5 * 60 * 1000) return null
-    return data
-  } catch {
-    return null
-  }
-}
-
-export function clearOutcomePending(): void {
-  try { writeFileSync(outcomeStateFile(), '{}') } catch {}
 }
 
 /**

@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { homedir } from 'node:os'
 import type { SessionState } from '../types.js'
 import { readActivity } from './activity-log.js'
+import { getContextLimit } from './context-limit.js'
 
 const IMPACT_DIR = resolve(homedir(), '.clauditor')
 const IMPACT_FILE = resolve(IMPACT_DIR, 'impact.json')
@@ -92,8 +93,7 @@ export function updateImpactFromSessions(
         lastTurn.usage.input_tokens +
         lastTurn.usage.cache_creation_input_tokens +
         lastTurn.usage.cache_read_input_tokens
-      const isOpus = session.model?.includes('opus') ?? false
-      const limit = isOpus ? 1_000_000 : 200_000
+      const limit = getContextLimit(session.model, contextSize)
       if (contextSize / limit >= 0.9) {
         updated.detected.contextOverflows++
       }

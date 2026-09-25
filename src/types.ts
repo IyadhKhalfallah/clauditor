@@ -195,7 +195,8 @@ export interface PostToolUseHookInput {
   hook_event_name: 'PostToolUse'
   tool_name: string
   tool_input: Record<string, unknown>
-  tool_response: string
+  /** String for most tools; Bash sends `{ stdout, stderr, ... }`. Use toolResponseText(). */
+  tool_response: unknown
   cwd?: string
 }
 
