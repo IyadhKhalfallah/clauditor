@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
+import { readOutcomePending, clearOutcomePending, setOutcomePending } from './outcome-pending.js'
 
 let tempDir: string
 let origHome: string
@@ -64,7 +64,26 @@ describe('readOutcomePending', () => {
   })
 })
 
+describe('setOutcomePending', () => {
+  it('creates ~/.clauditor and round-trips through readOutcomePending', () => {
+    const pending = { command: 'npm test', baseCommand: 'npm test', timestamp: Date.now() }
+    setOutcomePending(pending)
+    expect(readOutcomePending()).toEqual(pending)
+  })
+
+  it('swallows write errors', () => {
+    // ~/.clauditor as a regular file makes mkdirSync throw
+    const { writeFileSync } = require('node:fs')
+    writeFileSync(resolve(tempDir, '.clauditor'), 'not a dir')
+    expect(() => setOutcomePending({ command: 'x', baseCommand: 'x', timestamp: 1 })).not.toThrow()
+  })
+})
+
 describe('clearOutcomePending', () => {
+  it('swallows write errors when ~/.clauditor is missing', () => {
+    expect(() => clearOutcomePending()).not.toThrow()
+  })
+
   it('clears the pending state', () => {
     const { mkdirSync, writeFileSync } = require('node:fs')
     mkdirSync(resolve(tempDir, '.clauditor'), { recursive: true })

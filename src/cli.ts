@@ -7,6 +7,7 @@ import { homedir } from 'node:os'
 import { cosmiconfig } from 'cosmiconfig'
 import { DEFAULT_CONFIG } from './types.js'
 import type { ClauditorConfig } from './types.js'
+import { getContextLimit } from './features/context-limit.js'
 
 // Read version from package.json so it stays in sync with releases
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -95,8 +96,7 @@ program
         lastTurn.usage.cache_creation_input_tokens +
         lastTurn.usage.cache_read_input_tokens
       : 0
-    const isOpus = s.model?.includes('opus') ?? false
-    const contextLimit = isOpus ? 1_000_000 : 200_000
+    const contextLimit = getContextLimit(s.model, contextSize)
     const contextPct = Math.round((contextSize / contextLimit) * 100)
     const pricing = s.model ? getPricingForModel(s.model) : undefined
     const cost = estimateCost(s.totalUsage, pricing)

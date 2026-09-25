@@ -18,10 +18,31 @@ export function readStdin(): Promise<string> {
 }
 
 /**
- * Write hook decision to stdout.
+ * Write hook decision to stdout. Pass `hookEventName` for events that only
+ * read context from `hookSpecificOutput` — Claude Code accepts a top-level
+ * `additionalContext` on PostToolUse without error but never delivers it.
  */
-export function outputDecision(decision: HookDecision): void {
-  process.stdout.write(JSON.stringify(decision))
+export function outputDecision(decision: HookDecision, hookEventName?: 'PostToolUse'): void {
+  const { additionalContext, ...rest } = decision
+  if (!hookEventName || !additionalContext) {
+    process.stdout.write(JSON.stringify(decision))
+    return
+  }
+  process.stdout.write(JSON.stringify({ ...rest, hookSpecificOutput: { hookEventName, additionalContext } }))
+}
+
+/**
+ * Flatten a PostToolUse `tool_response` to text. Claude Code sends Bash
+ * results as `{ stdout, stderr, ... }`, not a string.
+ */
+export function toolResponseText(response: unknown): string {
+  if (typeof response === 'string') return response
+  if (!response || typeof response !== 'object') return ''
+  const { stdout, stderr } = response as { stdout?: unknown; stderr?: unknown }
+  const streams = [stdout, stderr].filter((s): s is string => typeof s === 'string' && s !== '')
+  if (streams.length > 0) return streams.join('\n')
+  if ('stdout' in response || 'stderr' in response) return ''
+  return JSON.stringify(response)
 }
 
 /**

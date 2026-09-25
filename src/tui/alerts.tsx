@@ -1,6 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import type { SessionState } from '../types.js'
+import { getContextLimit } from '../features/context-limit.js'
 
 interface AlertsProps {
   session: SessionState
@@ -135,8 +136,7 @@ function getAlerts(session: SessionState): Alert[] {
       lastTurn.usage.input_tokens +
       lastTurn.usage.cache_creation_input_tokens +
       lastTurn.usage.cache_read_input_tokens
-    const isOpus = session.model?.includes('opus') ?? false
-    const contextLimit = isOpus ? 1_000_000 : 200_000
+    const contextLimit = getContextLimit(session.model, contextSize)
     const pct = Math.round((contextSize / contextLimit) * 100)
 
     if (pct >= 100) {

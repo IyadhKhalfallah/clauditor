@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import type { PostToolUseHookInput, HookDecision, TurnMetrics } from '../types.js'
 import { compressBashOutput } from '../features/bash-filter.js'
 import { recordError, recordFix, recordOutcome, extractBaseCommand, trackCommand, clearCommandBuffer } from '../features/error-index.js'
-import { readOutcomePending, clearOutcomePending } from './pre-tool-use.js'
+import { readOutcomePending, clearOutcomePending } from '../features/outcome-pending.js'
 import { recordFileEdit, recordFileRead, getFileContext } from '../features/file-tracker.js'
 import { parseJsonlFile, extractTurns } from '../daemon/parser.js'
 import { detectCacheDegradation } from '../features/cache-health.js'
@@ -15,7 +15,8 @@ import { logActivity } from '../features/activity-log.js'
 import { saveSessionState, extractSessionStateFromTranscript, findTranscriptPathSync as findTranscriptSync } from '../features/session-state.js'
 import { readConfig } from '../config.js'
 import { loadCalibration } from '../features/calibration.js'
-import { readStdin, outputDecision, writeJsonFileAtomic, readJsonFile } from './shared.js'
+import { getContextLimit } from '../features/context-limit.js'
+import { readStdin, outputDecision, writeJsonFileAtomic, readJsonFile, toolResponseText } from './shared.js'
 
 /**
  * PostToolUse hook handler.
@@ -53,7 +54,7 @@ export async function handlePostToolUseHook(): Promise<void> {
     return
   }
 
-  outputDecision(decision)
+  outputDecision(decision, 'PostToolUse')
 }
 
 async function processToolResult(input: PostToolUseHookInput): Promise<HookDecision> {
@@ -87,7 +88,7 @@ async function processToolResult(input: PostToolUseHookInput): Promise<HookDecis
 
   // 1. Compress bash output if applicable
   if (input.tool_name === 'Bash') {
-    const toolResponse = input.tool_response || ''
+    const toolResponse = toolResponseText(input.tool_response)
     if (toolResponse.length >= 500) {
       const result = compressBashOutput(toolResponse)
       if (result.compressed) {
@@ -408,8 +409,7 @@ async function checkSessionHealth(sessionId: string): Promise<HookDecision | nul
       lastTurn.usage.cache_read_input_tokens
     // Detect model from the JSONL to get correct context limit
     const model = extractModel(records)
-    const isOpus = model?.includes('opus') ?? false
-    const contextLimit = isOpus ? 1_000_000 : 200_000
+    const contextLimit = getContextLimit(model, contextSize)
     const pct = Math.round((contextSize / contextLimit) * 100)
 
     if (pct >= 95) {
