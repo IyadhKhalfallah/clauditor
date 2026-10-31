@@ -33,7 +33,22 @@ export async function handleSessionStartHook(): Promise<void> {
   try { pruneStaleStateFiles() } catch {}
 
   const context = await buildSessionStartContext(hookInput.cwd, hookInput.session_id)
-  outputDecision(context)
+  process.stdout.write(JSON.stringify(sessionStartOutput(context)))
+}
+
+/**
+ * Claude Code reads SessionStart context only from `hookSpecificOutput`. A
+ * top-level `additionalContext` is accepted as a success but never reaches the
+ * model.
+ */
+export function sessionStartOutput(context: HookDecision): object {
+  if (!context.additionalContext) return {}
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'SessionStart',
+      additionalContext: context.additionalContext,
+    },
+  }
 }
 
 async function buildSessionStartContext(
