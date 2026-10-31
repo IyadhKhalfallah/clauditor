@@ -22,8 +22,10 @@ export class SessionWatcher {
 
   // Track file offsets for incremental reading
   private fileOffsets = new Map<string, number>()
-  // Cache parsed records per file so we only parse new lines
+  // Cache parsed records per file so we only parse new lines.
+  // Only filled while watching: one-shot scans never read it back.
   private fileRecords = new Map<string, SessionRecord[]>()
+  private retainRecords = false
 
   constructor(store: SessionStore, options: WatcherOptions = {}) {
     this.store = store
@@ -33,6 +35,8 @@ export class SessionWatcher {
   }
 
   async start(): Promise<void> {
+    this.retainRecords = true
+
     // Eagerly scan existing files first so the TUI has data immediately
     await this.scanAll()
 
@@ -105,11 +109,13 @@ export class SessionWatcher {
       const records = await parseJsonlFile(filePath)
 
       // Cache records and track file size for incremental reads
-      this.fileRecords.set(filePath, records)
-      try {
-        const fileStat = await stat(filePath)
-        this.fileOffsets.set(filePath, fileStat.size)
-      } catch {}
+      if (this.retainRecords) {
+        this.fileRecords.set(filePath, records)
+        try {
+          const fileStat = await stat(filePath)
+          this.fileOffsets.set(filePath, fileStat.size)
+        } catch {}
+      }
 
       this.updateStore(filePath, records)
     } catch {
