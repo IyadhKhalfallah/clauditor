@@ -87,7 +87,7 @@ Requires Node.js 20+.
 
 **Supported platforms:** Claude Code CLI, VS Code extension, JetBrains extension. Does **not** work with Claude Code on the web (claude.ai/code).
 
-**Known limitation:** The "continue" prompt block works reliably in the CLI. In the VS Code extension, the `UserPromptSubmit` hook [may not fire consistently](https://github.com/anthropics/claude-code/issues/17277) — context is still injected via `SessionStart` but Claude may not always announce it. This is a Claude Code bug, not a clauditor issue.
+**Known limitation:** The "continue" prompt block works reliably in the CLI. The VS Code extension [shows no message when a `UserPromptSubmit` hook blocks a prompt](https://github.com/anthropics/claude-code/issues/75534), so the block can look like nothing happened. Session context from `SessionStart` still reaches Claude in both.
 
 ## How it works
 
@@ -453,7 +453,7 @@ After 200 turns, the history alone can be 200k+ tokens. A fresh session resets t
 - **Cache reads may or may not count toward quota.** The exact quota accounting for Max plan subscribers is not published.
 - **Web sessions not supported.** Only CLI and IDE extensions write local JSONL files.
 - **Per-device only.** Sessions don't sync across machines.
-- **VS Code UserPromptSubmit limitation.** The "continue" prompt block works in CLI but [may not fire in VS Code](https://github.com/anthropics/claude-code/issues/17277). Context is still injected via SessionStart.
+- **VS Code UserPromptSubmit limitation.** The "continue" prompt block works in CLI, but [VS Code shows no message for a blocked prompt](https://github.com/anthropics/claude-code/issues/75534). Context is still injected via SessionStart.
 
 ## Development
 
